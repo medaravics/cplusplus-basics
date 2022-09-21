@@ -1,46 +1,42 @@
-/******************************************************************************
-
-                              Online C++ Compiler.
-               Code, Compile, Run and Debug C++ program online.
-Write your code in this editor and press "Run" button to compile and execute it.
-
-*******************************************************************************/
-
+/**
+*    Extract first number occurence from a string. 
+*    Author : RCS
+**/
 #include <iostream>
 #include <sstream>
-#include <cstring>
-
+#include <vector>
 
 using namespace std;
 
+// Return first occurance of a number in the given string 
 
 string extractFirstNumberOccurence( string str)
 {
   stringstream buffer;
-  int i; 
-  int tot = str.length();
-  int beginFlag=1;
+  int flag=false; //Found first occurence of a digit in the string.
   for ( std::string::iterator it=str.begin(); it!=str.end(); ++it)
-  {
-       
+  {    
       if((*it>='0' && *it<='9'))
       {
          buffer.put(*it);
-         beginFlag=false;
+         flag=true;
       }else {
-        if(!beginFlag) break;
+        if(flag) break; //Break the loop if all the digits of first occurance of a number are read;
       }
   }
+  if(!flag) { cout << "WARNING: Expecting a Number, but there is no number in the string. "; }
   return buffer.str();
 }
-// Driver code
+
 int main()
 {
-        string s = "geeks for geeks geeks 1 2354 251"
-                        "contribution placements";
-        string s1 ="sip:+526632970137;phone-context=ims.mnc028.mcc510.3gppnetwok.org@ims.mnc028.mcc510.3gppnetwok.org;user=phone";
-        cout << " Number of words are: " << extractFirstNumberOccurence(s1);
-        cout << endl ;
+        vector<std::string> testStrings {
+            "sip:+526632970137;phone-context=ims.mnc028.mcc510.3gppnetwok.org@ims.mnc028.mcc510.3gppnetwok.org;user=phone",
+            "sip:526632970137",
+            "sip:+6632970137@ims.mnc028.mcc510.3gppnetwok.org",
+            "ppnetwok.org@ims.mnc"
+            };
+        for(int i=0; i<testStrings.size(); i++)
+           cout << " Number of words are: " << extractFirstNumberOccurence(testStrings[i])<<endl;
         return 0;
 }
-
