@@ -1,0 +1,2090 @@
+
+#define SQLCA_STORAGE_CLASS extern
+
+#include <sqlca.h>
+#include <string.h>
+#include <iostream>
+#include <list>
+
+#include "GenericPoolManager.h"
+#include "UpdateDb.h"
+#include "DataFromDb.h"
+#include "ActiveLogger.h" 
+#include "../inc/SmsDbFunction.h"
+#include "ESqlRes.h" 
+#include "BCDEncoder.h"
+
+using namespace std;
+#ifdef UNIX
+EXEC SQL INCLUDE ../../../framework/inc/DbConnectionObject.h;
+#else
+EXEC SQL INCLUDE ../../../framework/inc/DbConnectionObject.h;
+#endif
+
+ESqlRes SmsDbFunction::isMsisdnFoundInMwd(void *dbConnObj,Number msisdn ) 
+{
+  struct sqlca sqlca;
+  unsigned long m_Index=1;
+  BCDEncoder BCDEncoderobj;
+
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0,"Entering isMsisdnFoundInMwd |%s",__FUNCTION__);
+
+
+  if (dbConnObj == NULL )
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Given connection pool is null  |%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0,"Leaving isMsisdnFoundInMwd   |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+  DbConnectionObject* m_RunTimeCntxt = NULL;
+  m_RunTimeCntxt  = (DbConnectionObject*)dbConnObj;
+
+  if ( m_RunTimeCntxt == NULL )
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Connection Object Could not be Acquired |%s",__FUNCTION__);
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0,"Leaving isMsisdnFoundInMwd  |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+  char msisdn_temp[MSISDN_SIZE +1];
+  memset (msisdn_temp,'\0',sizeof(msisdn_temp));
+  int msisdn_len = msisdn.getOriginalLength();
+
+  if( msisdn_len <= 0 || msisdn_len > MSISDN_SIZE / 2)
+  {
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0,"Msisdn Check failed  |%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0,"Leaving isMsisdnFoundInMwd  |%s",__FUNCTION__);
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode)); 
+    return CODE_EXCEPTION;	
+  }
+
+  memcpy(msisdn_temp,  msisdn.getValue(), msisdn_len);
+  msisdn_temp[msisdn_len] = '\0';
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0,"MSISDN Len =  |%d |%s",msisdn_len,__FUNCTION__);
+
+
+  EXEC SQL BEGIN DECLARE SECTION;
+
+  varchar		l_msisdn_c[MSISDN_SIZE +1];
+
+  int		l_count_i;
+
+  EXEC SQL END DECLARE SECTION;
+
+  //copy input params to the host variables
+
+  memset( &l_msisdn_c,  '\0',  sizeof(l_msisdn_c) );
+  l_count_i = 0;
+
+  try
+  {
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Connection Object Acquired |%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, (char *)"SUCC::  Index :%ld|%s",m_Index,__FUNCTION__);
+
+    EXEC SQL CONTEXT USE :(m_RunTimeCntxt->iCtx);
+
+    l_msisdn_c.len = BCDEncoderobj.BCDToChar( (char *)l_msisdn_c.arr ,msisdn_temp, msisdn_len);
+    l_msisdn_c.arr[l_msisdn_c.len] = '\0';
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "Char MSISDN = %s Len = %d |%s",(char *)l_msisdn_c.arr, l_msisdn_c.len,__FUNCTION__);
+
+    EXEC SQL WHENEVER SQLERROR GOTO SQL_ERROR_OCCURED;
+    EXEC SQL WHENEVER NOT FOUND GOTO DATA_NOT_FOUND;
+
+    // execute the queries and get the values into host varibles.
+
+    EXEC SQL SELECT COUNT(1) INTO: l_count_i 
+      FROM HLR_TR_MWD_INFO 
+      WHERE  MSISDN=:l_msisdn_c AND STATUS = 'N' ;
+    if(l_count_i)
+    {
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Given MSISDN is  found | %s",__FUNCTION__);
+      //      g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode)); 
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving isMsisdnFoundInMwd |%s",__FUNCTION__);
+      return CODE_SQL_SUCCESS;
+    }
+    else
+      goto DATA_NOT_FOUND;
+  }
+  catch (...)
+  {
+    //g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0," Caught an Exception |%s",__FUNCTION__);
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving isMsisdnFoundInMwd |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+
+DATA_NOT_FOUND:  
+  {	
+    loggerObj.log(LM_INFO,__FILE__,__LINE__,0,0, " DATA_NOT_FOUND |%s",__FUNCTION__);
+    //    g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving isMsisdnFoundInMwd |%s",__FUNCTION__);
+    return ROWS_NOT_FOUND;
+  }
+
+SQL_ERROR_OCCURED:
+  {	
+    //    g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Oracle Error code = %d, Mesg = %s|%s",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc, __FUNCTION__);
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving isMsisdnFoundInMwd |%s",__FUNCTION__);
+    return PROC_CODE_ERROR;
+  }
+}
+
+ESqlRes SmsDbFunction::isScAddressFoundInMwd(void* dbConnObj, Number scAddress,Number msisdn ) 
+{
+  struct sqlca sqlca;
+  unsigned long m_Index=1;
+  BCDEncoder BCDEncoderobj;
+
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " from Function isScAddressFoundInMwd |%s",__FUNCTION__);
+
+  if (dbConnObj==NULL)
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Given connection pool is null |%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving isScAddressFoundInMwd |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+  DbConnectionObject* m_RunTimeCntxt =NULL;
+  m_RunTimeCntxt = (DbConnectionObject*)dbConnObj;
+
+  if (m_RunTimeCntxt==NULL)
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Connection Object Could not be Acquired|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving isScAddressFoundInMwd |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+  //copy input params to the host variables
+
+  EXEC SQL BEGIN DECLARE SECTION;
+
+  varchar				l_scAddress_c[SCADDRESS_SIZE +1];
+  varchar       l_msisdn_c[SCADDRESS_SIZE +1];
+  int				    l_count_i;
+
+  EXEC SQL END DECLARE SECTION;
+
+  memset(&l_scAddress_c,  '\0',  sizeof(l_scAddress_c));
+  memset(&l_msisdn_c,  '\0',  sizeof(l_msisdn_c));
+  l_count_i = 0;
+
+  char scaddr_temp[SCADDRESS_SIZE +1] ;
+  char msisdn_temp[SCADDRESS_SIZE +1] ;
+  int scaddr_len = scAddress.getOriginalLength();
+  int msisdn_len = msisdn.getOriginalLength();
+  memset( scaddr_temp, '\0', sizeof(scaddr_temp) );
+  if( scaddr_len <= 0 ||  scaddr_len > SCADDRESS_SIZE / 2)
+  {
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, " SCAddress Check failed |%s",__FUNCTION__ );
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving isScAddressFoundInMwd |%s",__FUNCTION__);
+    //    g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    return CODE_EXCEPTION;	
+  }
+
+  if( msisdn_len <= 0 ||  msisdn_len > SCADDRESS_SIZE / 2)
+  {
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, " MSISDN Check failed |%s",__FUNCTION__ );
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving isScAddressFoundInMwd |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+  memcpy(scaddr_temp, scAddress.getValue(), scaddr_len);
+  memcpy(msisdn_temp, msisdn.getValue(), msisdn_len);
+
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " SCAddress Len = %d |%s",scaddr_len,__FUNCTION__);
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " msisdn Len = %d |%s",msisdn_len,__FUNCTION__);
+
+  try
+  {
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, (char *)"SUCC::  Index :%ld|%s",m_Index,__FUNCTION__);
+
+    EXEC SQL CONTEXT USE :(m_RunTimeCntxt->iCtx);
+
+    EXEC SQL WHENEVER SQLERROR GOTO SQL_ERROR_OCCURED;
+    EXEC SQL WHENEVER NOT FOUND GOTO DATA_NOT_FOUND;
+
+    l_scAddress_c.len = BCDEncoderobj.BCDToChar( (char *)l_scAddress_c.arr ,scaddr_temp, scaddr_len);
+    l_msisdn_c.len = BCDEncoderobj.BCDToChar( (char *)l_msisdn_c.arr ,msisdn_temp, msisdn_len);
+
+    l_scAddress_c.arr[l_scAddress_c.len] = '\0';
+    l_msisdn_c.arr[l_msisdn_c.len] = '\0';
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " CHAR SCADDR = %s Len = %d |%s",(char *)l_scAddress_c.arr,l_scAddress_c.len,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " CHAR MSISDN = %s Len = %d |%s",(char *)l_msisdn_c.arr,l_msisdn_c.len,    __FUNCTION__);
+
+    // execute the queries and get the values into host varibles.
+
+    EXEC SQL SELECT COUNT(1) INTO: l_count_i 
+      FROM HLR_TR_MWD_INFO 
+      WHERE MSISDN=:l_msisdn_c AND SVC_CENTRE_ADDRESS =:l_scAddress_c AND STATUS = 'N' ;
+
+    if(l_count_i)
+    {
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "Given ScAddress|%s| is  found for msisdn |%s|%s",l_scAddress_c.arr,     l_msisdn_c.arr,__FUNCTION__ );
+      //    g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode)); 
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving isScAddressFoundInMwd |%s",__FUNCTION__);
+      return CODE_SQL_SUCCESS;
+    }
+    else
+      goto DATA_NOT_FOUND;
+  }
+  catch(...)
+  {
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Caught Exceptions|%s",__FUNCTION__);
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving isScAddressFoundInMwd |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+DATA_NOT_FOUND: 
+  {
+    loggerObj.log(LM_INFO,__FILE__,__LINE__,0,0, "No Data found|%s",__FUNCTION__);
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving isScAddressFoundInMwd |%s",__FUNCTION__);
+    return ROWS_NOT_FOUND;
+  }
+
+SQL_ERROR_OCCURED:
+  {	
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Oracle Error code = %d, Mesg = %s |%s",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc, __FUNCTION__);
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving isScAddressFoundInMwd |%s",__FUNCTION__);
+    return PROC_CODE_ERROR;
+  }
+}
+
+ESqlRes SmsDbFunction::getScAdresses(void* dbConnObj, Number& msisdn, list<Number>& scad ) 
+{
+  struct sqlca sqlca;
+  unsigned long m_Index=1;
+  int count=0;
+  BCDEncoder BCDEncoderobj;
+
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "Entering  getScAdresses |%s",__FUNCTION__);
+
+  if (dbConnObj==NULL)
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0, "Given connection pool is null |%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getScAdresses |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }	
+
+  DbConnectionObject*  m_RunTimeCntxt =NULL;
+  m_RunTimeCntxt = (DbConnectionObject*)dbConnObj;
+
+  if (m_RunTimeCntxt==NULL)
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Connection Object Could not be Acquired|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getScAdresses |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+  char msisdn_temp[MSISDN_SIZE +1] ={ 0 };
+  int msisdn_len = msisdn.getOriginalLength();
+
+  if( msisdn_len <= 0 ||  msisdn_len > MSISDN_SIZE / 2)
+  {
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, " Msisdn Check failed | %s |",__FUNCTION__  );
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getScAdresses |%s",__FUNCTION__);
+    //  g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    return CODE_EXCEPTION;	
+  }
+
+  memcpy(msisdn_temp,  msisdn.getValue(), msisdn_len);  
+  msisdn_temp[msisdn_len]='\0';
+
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " MSISDN Len = %d |%s",msisdn_len,__FUNCTION__);
+
+  EXEC SQL BEGIN DECLARE SECTION;
+
+  varchar		l_msisdn_c[MSISDN_SIZE +1];
+  varchar		l_scAddress_c[SCADDRESS_SIZE +1];
+
+  EXEC SQL END DECLARE SECTION;
+
+  //copy input params to the host variables
+
+  memset(&l_msisdn_c,  '\0',  sizeof(l_msisdn_c));
+  memset(&l_scAddress_c, '\0',  sizeof(l_scAddress_c));
+
+  try
+  {
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, (char *)"SUCC::  Index :%ld|%s",m_Index,__FUNCTION__);
+
+    EXEC SQL CONTEXT USE :(m_RunTimeCntxt->iCtx);
+
+    l_msisdn_c.len = BCDEncoderobj.BCDToChar( (char *)l_msisdn_c.arr ,msisdn_temp, msisdn_len);
+    l_msisdn_c.arr[l_msisdn_c.len] = '\0';
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " CHAR l_msisdn_c = %s | msisdn_len = %d |%s",(char *)l_msisdn_c.arr ,l_msisdn_c.len,__FUNCTION__ );
+
+    EXEC SQL WHENEVER SQLERROR GOTO SQL_ERROR_OCCURED;
+    EXEC SQL WHENEVER NOT FOUND GOTO DATA_NOT_FOUND;
+
+    // execute the queries and get the values into host varibles.
+
+    EXEC SQL DECLARE sc_cursor CURSOR FOR SELECT NVL(SVC_CENTRE_ADDRESS, 0)
+      FROM HLR_TR_MWD_INFO 
+      WHERE MSISDN=:l_msisdn_c AND STATUS = 'N' ;
+
+    EXEC SQL OPEN sc_cursor;
+
+    EXEC SQL WHENEVER NOT FOUND DO break;
+
+    char scd_temp[ SCADDRESS_SIZE + 1 ] ;
+    int scd_len = -1; 
+
+    while(1)
+    {
+      memset(scd_temp,'\0',sizeof(scd_temp));
+      scd_len = -1;
+
+      EXEC SQL FETCH sc_cursor INTO:l_scAddress_c;
+      l_scAddress_c.arr[l_scAddress_c.len] = '\0';
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0," l_scAddress_c   = %s|%s",(char *)l_scAddress_c.arr,__FUNCTION__);
+      if( !((l_scAddress_c.arr[0] == 0x30) && (l_scAddress_c.len == 1)) )
+      {
+        scd_len = BCDEncoderobj.CharToBCD(scd_temp,(char *)l_scAddress_c.arr,l_scAddress_c.len);
+        Number scaddr(scd_len);
+        scaddr.setValue(scd_temp,scd_len); 
+        scad.push_back(scaddr);
+        count++;
+      }
+    }
+    if (count) {
+      EXEC SQL CLOSE sc_cursor;
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "scaddress Obtained|%s",__FUNCTION__);
+      //      g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode)); 
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getScAdresses |%s",__FUNCTION__);
+      return CODE_SQL_SUCCESS;
+    }
+    else
+      goto DATA_NOT_FOUND;
+  }
+  catch(...)
+  {
+    EXEC SQL CLOSE sc_cursor;
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Caught Exceptions|%s",__FUNCTION__);
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getScAdresses |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+DATA_NOT_FOUND: 
+  {
+    EXEC SQL CLOSE sc_cursor;
+    loggerObj.log(LM_INFO,__FILE__,__LINE__,0,0, " No Data found |%s",__FUNCTION__);
+    //    g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getScAdresses |%s",__FUNCTION__);
+    return ROWS_NOT_FOUND;
+  }
+SQL_ERROR_OCCURED:
+  {
+    EXEC SQL CLOSE sc_cursor;
+    //    g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Oracle Error code = %d, Mesg = %s |%s",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc, __FUNCTION__);
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getScAdresses |%s",__FUNCTION__);
+    return PROC_CODE_ERROR;
+  }
+
+}
+
+
+ESqlRes SmsDbFunction::getDistinctMsisdnInMwd(void* dbConnObj, list<Number> &msdn )
+{
+  struct sqlca sqlca;
+  unsigned long m_Index=1;
+  int count=0;
+  BCDEncoder BCDEncoderobj;
+
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Entering getDistinctMsisdnInMwd |%s",__FUNCTION__);
+
+  if (dbConnObj==NULL)
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Given connection pool is null |%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getDistinctMsisdnInMwd |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }	
+  DbConnectionObject*  m_RunTimeCntxt =NULL;
+  m_RunTimeCntxt = (DbConnectionObject*)dbConnObj;
+  if (m_RunTimeCntxt==NULL)
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Connection Object Could not be Acquired|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getDistinctMsisdnInMwd |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+  EXEC SQL BEGIN DECLARE SECTION;
+
+  varchar		l_msisdn_c[MSISDN_SIZE +1];
+
+  EXEC SQL END DECLARE SECTION;
+
+  memset( &l_msisdn_c, '\0', sizeof(l_msisdn_c));
+
+  try
+  {
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "Connection Object Acquired|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, (char *)"SUCC::  Index :%ld |%s",m_Index,__FUNCTION__);
+
+    EXEC SQL CONTEXT USE :(m_RunTimeCntxt->iCtx);
+
+    EXEC SQL WHENEVER SQLERROR GOTO SQL_ERROR_OCCURED;
+
+    // execute the queries and get the values into host varibles.
+    EXEC SQL  DECLARE msi_cursor CURSOR FOR SELECT DISTINCT (MSISDN) 
+      FROM HLR_TR_MWD_INFO WHERE  STATUS = 'N';
+
+    EXEC SQL OPEN msi_cursor;
+
+    EXEC SQL WHENEVER NOT FOUND DO break;
+
+    char msdn_temp[MSISDN_SIZE +1];
+    int msisdn_len;
+    while(1)
+    {
+      EXEC SQL FETCH msi_cursor INTO:l_msisdn_c;
+      l_msisdn_c.arr[l_msisdn_c.len] = '\0';
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0," l_msisdn_c = %s|%s",(char *)l_msisdn_c.arr,__FUNCTION__);
+
+      if( !((l_msisdn_c.arr[0] == 0x30) && (l_msisdn_c.len == 1)) )
+      {
+        msisdn_len = BCDEncoderobj.CharToBCD(msdn_temp,(char *)l_msisdn_c.arr,l_msisdn_c.len);	
+        Number msisdn(msisdn_len);
+        msisdn.setValue(msdn_temp, msisdn_len );
+        msdn.push_back(msisdn);
+        count++;
+      }
+    }
+    if(count)
+    {
+      EXEC SQL CLOSE msi_cursor;
+      //      g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode)); 
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " List of msisdn found |%s",__FUNCTION__);
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getDistinctMsisdnInMwd |%s",__FUNCTION__);
+      return CODE_SQL_SUCCESS;	
+    }
+    else 
+      goto DATA_NOT_FOUND;
+  }
+  catch(...)
+  {
+    EXEC SQL CLOSE msi_cursor;
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Caught Exception|%s",__FUNCTION__);
+    //  g_ConnectionPool->returnMember(m_RunTimeCntxt, m_Index, m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getDistinctMsisdnInMwd |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+DATA_NOT_FOUND: 
+  {
+    EXEC SQL CLOSE msi_cursor;
+    loggerObj.log(LM_INFO,__FILE__,__LINE__,0,0, "No Data found|%s",__FUNCTION__);
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt, m_Index, m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getDistinctMsisdnInMwd |%s",__FUNCTION__);
+    return ROWS_NOT_FOUND;
+  }
+
+SQL_ERROR_OCCURED:
+  {
+    EXEC SQL CLOSE msi_cursor;
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Oracle Error code = %d, Mesg = %s |%s",sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc, __FUNCTION__);
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getDistinctMsisdnInMwd |%s",__FUNCTION__);
+    return PROC_CODE_ERROR;
+  }
+}
+
+
+ESqlRes SmsDbFunction::updateMwdList( void *dbConnObj, Number &msisdn, Number &scAddress, Number &status)
+{
+  struct sqlca sqlca;
+  unsigned long m_Index=1;
+  BCDEncoder BCDEncoderobj;
+
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Entering updateMwdList |%s",__FUNCTION__);
+
+  if (dbConnObj == NULL)
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Given connection pool is null |%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateMwdList |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }	
+
+  DbConnectionObject*  m_RunTimeCntxt =NULL;
+  //m_RunTimeCntxt = (DbConnectionObject*)g_ConnectionPool->allocateMember(&m_Index);
+  m_RunTimeCntxt = (DbConnectionObject*)dbConnObj;
+  unsigned int queryIndex = 0;
+  if (m_RunTimeCntxt==NULL)
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Connection Object Could not be Acquired|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateMwdList |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+  char msisdn_temp[MSISDN_SIZE +1];
+  int msisdn_len = msisdn.getOriginalLength();
+  memset( msisdn_temp, '\0', sizeof(msisdn_temp) );
+  if( msisdn_len <= 0 || msisdn_len > MSISDN_SIZE / 2)
+  {
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, " MSISDN check failed |%s|",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateMwdList |%s",__FUNCTION__);
+    //g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    return CODE_EXCEPTION;	
+  }
+  memcpy(msisdn_temp,  msisdn.getValue(), msisdn_len);
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "  MSISDN=%s and MSISDN Len = %d |%s",msisdn_temp,msisdn_len,__FUNCTION__);
+
+  char scaddr_temp[SCADDRESS_SIZE +1] ;
+  int scaddr_len = scAddress.getOriginalLength();
+  memset( scaddr_temp, '\0', sizeof(scaddr_temp) );
+  if( scaddr_len <= 0 || scaddr_len > SCADDRESS_SIZE / 2)
+  {
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "SCAddress check failed |%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateMwdList |%s",__FUNCTION__);
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    return CODE_EXCEPTION;	
+  }
+
+  memcpy(scaddr_temp, scAddress.getValue(), scaddr_len);
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "  SCAddress Len = %d |%s", scaddr_len,__FUNCTION__);
+
+
+  EXEC SQL BEGIN DECLARE SECTION;
+
+  varchar		l_msisdn_c[MSISDN_SIZE +1];
+  varchar		l_scAddress_c[SCADDRESS_SIZE +1];
+  varchar		l_status_c[STATUS_SIZE +1];
+  //char 		l_status;
+  int 		  l_count;
+  int 		  l_count1;
+
+  EXEC SQL END DECLARE SECTION;
+
+  //copy input params to the host variables
+
+  memset(&l_msisdn_c,	'\0', sizeof(l_msisdn_c));
+  memset(&l_scAddress_c,'\0', sizeof(l_scAddress_c));
+  memset(&l_status_c,	'\0', sizeof(l_status_c));
+  l_count = 0;
+  l_count1=0;
+
+  try
+  {
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "Connection Object Acquired|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, (char *)"SUCC::  Index :%ld|%s",m_Index,__FUNCTION__);
+
+    EXEC SQL CONTEXT USE :(m_RunTimeCntxt->iCtx);
+
+    l_msisdn_c.len = BCDEncoderobj.BCDToChar( (char *)l_msisdn_c.arr ,msisdn_temp, msisdn_len);
+    l_msisdn_c.arr[l_msisdn_c.len] = '\0';
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " CHAR MSISDN = %s| Len = %d |%s",(char *)l_msisdn_c.arr,l_msisdn_c.len,__FUNCTION__);
+
+    l_scAddress_c.len  = BCDEncoderobj.BCDToChar( (char *)l_scAddress_c.arr ,scaddr_temp, scaddr_len);
+    l_scAddress_c.arr[l_scAddress_c.len] = '\0';
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " CHAR SCADDR = %s| Len = %d |%s",(char *)l_scAddress_c.arr,l_scAddress_c.len,__FUNCTION__);
+
+    memcpy(l_status_c.arr ,status.getValue(), status.getOriginalLength());
+    l_status_c.arr[status.getOriginalLength()] = '\0';
+    l_status_c.len = status.getOriginalLength();
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "  l_status_c = %s |%s",(char *)l_status_c.arr,__FUNCTION__);
+
+    EXEC SQL WHENEVER SQLERROR GOTO SQL_ERROR_OCCURED;
+    EXEC SQL WHENEVER NOT FOUND GOTO DATA_NOT_FOUND;
+
+    // execute the queries and get the values into host varibles.
+
+    //Begin Spell-2.0.16.0
+    queryIndex = 1;
+    EXEC SQL SELECT COUNT(1) INTO :l_count
+      FROM HLR_TR_MWD_INFO
+      WHERE MSISDN= :l_msisdn_c AND SVC_CENTRE_ADDRESS= :l_scAddress_c AND STATUS='N';
+
+    if((l_count <= 0) && (l_status_c.arr[0] == 'N'))
+    {
+      queryIndex = 2;
+      EXEC SQL SELECT COUNT(1) INTO :l_count1
+        FROM HLR_TR_MWD_INFO
+        WHERE MSISDN= :l_msisdn_c AND SVC_CENTRE_ADDRESS= :l_scAddress_c AND STATUS = 'D';
+
+      if(l_count1 >= 1)
+      {
+        queryIndex = 3;
+        EXEC SQL UPDATE HLR_TR_MWD_INFO SET STATUS = :l_status_c,LAST_UPDATED_DATE = SYSDATE  where MSISDN= :l_msisdn_c and
+          SVC_CENTRE_ADDRESS = :l_scAddress_c; //Added MWD time stamp for the release 2.0.15.0
+      }
+      else
+      {
+        queryIndex = 4;
+        EXEC SQL INSERT INTO HLR_TR_MWD_INFO(MSISDN,SVC_CENTRE_ADDRESS,STATUS,LAST_UPDATED_DATE) VALUES(:l_msisdn_c,
+            :l_scAddress_c, :l_status_c,sysdate); // Added MWD time stamp for the release 2.0.15.0
+      }
+    }
+
+    queryIndex = 5;
+    if(l_count && (l_status_c.arr[0] == 'D'))
+      EXEC SQL UPDATE HLR_TR_MWD_INFO SET STATUS = :l_status_c,LAST_UPDATED_DATE = SYSDATE  where MSISDN= :l_msisdn_c and    SVC_CENTRE_ADDRESS = :l_scAddress_c; //Added MWD time stamp for the release 2.0.15.0
+
+    //End Spell-2.0.16.0
+
+    EXEC SQL COMMIT ;  
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "STATUS UPDATED|%s",__FUNCTION__);  
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode)); 
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateMwdList |%s",__FUNCTION__);
+    return CODE_SQL_SUCCESS;
+
+  }
+  catch(...)
+  {
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Caught Exception|%s",__FUNCTION__);
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"SQL error occured at Query Index [%d] |%s",queryIndex,__FUNCTION__);
+    EXEC SQL ROLLBACK ;
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateMwdList |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+DATA_NOT_FOUND: 
+  {
+    loggerObj.log(LM_INFO,__FILE__,__LINE__,0,0, "No Data found|%s",__FUNCTION__);
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"SQL error occured at Query Index [%d] |%s",queryIndex,__FUNCTION__);
+    EXEC SQL ROLLBACK ;
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateMwdList |%s",__FUNCTION__);
+    return ROWS_NOT_FOUND;  
+  }
+
+SQL_ERROR_OCCURED:
+  {
+    EXEC SQL ROLLBACK ;
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Oracle Error code = %d, Mesg = %s |%s",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc, __FUNCTION__);
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"SQL error occured at Query Index [%d] |%s",queryIndex,__FUNCTION__);
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateMwdList |%s",__FUNCTION__);
+    return PROC_CODE_ERROR;
+  }
+}
+
+ESqlRes SmsDbFunction::updateSmsInfo(UpdateDb *obj)
+{
+  struct sqlca sqlca;
+  unsigned long m_Index=1;
+  BCDEncoder BCDEncoderobj;
+
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Entering updateSmsInfo |%s",__FUNCTION__);
+
+  if ((obj->dbConnObj==NULL) || (obj == NULL))
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Given connection pool is null or obj is null |%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateSmsInfo |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }	 
+  unsigned int queryIndex = 0;
+  DbConnectionObject*  m_RunTimeCntxt =NULL;
+  //m_RunTimeCntxt = (DbConnectionObject*)g_ConnectionPool->allocateMember(&m_Index);
+  m_RunTimeCntxt = (DbConnectionObject*)obj->dbConnObj;
+
+  if (m_RunTimeCntxt==NULL)
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Connection Object Could not be Acquired|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateSmsInfo |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+  char imsi_temp[IMSI_SIZE +1] ;
+  char msisdn_temp[MSISDN_SIZE +1] ;
+
+  Number imsi = obj->getImsi();
+  int imsi_len =  imsi.getOriginalLength();
+
+  Number msisdn=obj->getMsisdn();
+  int msisdn_len =  msisdn.getOriginalLength();
+
+  if ( imsi_len <= 0 && msisdn_len <=0 || imsi_len > IMSI_SIZE / 2 || msisdn_len > MSISDN_SIZE / 2 )
+  {
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "  IMSI  and MSISDN check failed | %s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateSmsInfo |%s",__FUNCTION__);
+    //    g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    return CODE_EXCEPTION;
+  }
+  memset(imsi_temp,  '\0',  sizeof(imsi_temp) );
+  memset(msisdn_temp, '\0', sizeof(msisdn_temp) );
+
+  memcpy(imsi_temp, imsi.getValue(), imsi_len);
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " IMSI Len = %d |%s ",imsi_len,__FUNCTION__);
+
+  memcpy(msisdn_temp,  msisdn.getValue(), msisdn_len);
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " MSISDN Len = %d |%s",msisdn_len,__FUNCTION__);
+
+
+  EXEC SQL BEGIN DECLARE SECTION;
+
+  varchar		l_imsi_c[IMSI_SIZE +1];
+  varchar		l_msisdn_c[MSISDN_SIZE +1];
+  varchar		l_lmsi_c[LMSI_SIZE +1];
+  varchar		l_mnrg_c[MNRG_SIZE +1];
+  varchar		l_mnrf_c[MNRF_SIZE + 1] ; 
+  varchar		l_mnrr_c_gsm[MNRR_SIZE +1] = {'\0'};
+  varchar		l_mnrr_c_gprs[MNRR_SIZE +1] = {'\0'};
+  varchar		l_mcef_c[MCEF_SIZE +1];
+  varchar		l_sgsnAddress_c[SGSNADDR_SIZE +1]; 
+  varchar		l_sgsnNumber_c[SGSNNUM_SIZE + 1];
+  varchar		l_notreachableGsm_c[ NOTREACHABLE_SIZE +1];
+  varchar		l_notreachableGprs_c[ NOTREACHABLE_SIZE + 1];
+  //Begin spell-2100
+  varchar		l_mspurgedNonGprs_c[ MSPURGENONGPRS_SIZE + 1];
+  varchar		l_mspurgedGprs_c[ MSPURGEGPRS_SIZE + 1];
+  varchar		l_superCharger_c_gsm[SUPERCHARGERSUPPORTSINVLR_SIZE +1] ; 
+  varchar		l_superCharger_c_gprs[SUPERCHARGERSUPPORTSINSGSN_SIZE +1];
+  //End spell-2100
+
+
+  EXEC SQL END DECLARE SECTION;
+
+  //copy input params to the host variables
+
+  memset(&l_imsi_c,  '\0',  sizeof(l_imsi_c) );
+  memset(&l_msisdn_c, '\0', sizeof(l_msisdn_c) );
+  memset(&l_lmsi_c, '\0',   sizeof(l_lmsi_c) );
+  memset(&l_mnrg_c,  '\0',  sizeof(l_mnrg_c) );
+  memset(&l_mnrf_c,  '\0',  sizeof(l_mnrf_c) );
+  memset(&l_mcef_c,  '\0',  sizeof(l_mcef_c) );
+  //  memset(&l_mnrr_c,  '\0',  sizeof(l_mnrr_c) );
+  memset(&l_sgsnAddress_c,  '\0',  sizeof(l_sgsnAddress_c));
+  memset(&l_sgsnNumber_c,  '\0',  sizeof(l_sgsnNumber_c));
+  memset(&l_notreachableGsm_c,  '\0',  sizeof(l_notreachableGsm_c) );
+  memset(&l_notreachableGprs_c,  '\0',  sizeof(l_notreachableGprs_c) );
+
+  //spell-2100
+  memset(&l_mspurgedGprs_c,  '\0',  sizeof(l_mspurgedGprs_c) );
+  memset(&l_mspurgedNonGprs_c,  '\0',  sizeof(l_mspurgedNonGprs_c) );
+
+  memset(&l_superCharger_c_gsm, '\0', sizeof(l_superCharger_c_gsm));
+  memset(&l_superCharger_c_gprs, '\0', sizeof(l_superCharger_c_gprs));
+
+  //End spell-2100
+
+
+  try
+  {
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "Connection Object Acquired|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, (char *)"SUCC::  Index :%ld|%s",m_Index,__FUNCTION__);
+
+    l_imsi_c.len = BCDEncoderobj.BCDToChar( (char *)l_imsi_c.arr ,imsi_temp, imsi_len);
+    l_imsi_c.arr[l_imsi_c.len] = '\0';
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " CHAR IMSI = %s| Len = %d |%s",(char *)l_imsi_c.arr,l_imsi_c.len,__FUNCTION__);
+
+    l_msisdn_c.len = BCDEncoderobj.BCDToChar( (char *)l_msisdn_c.arr ,msisdn_temp, msisdn_len);
+    l_msisdn_c.arr[l_msisdn_c.len] = '\0';
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " CHAR MSISDN = %s| Len = %d |%s",(char *)l_msisdn_c.arr,l_msisdn_c.len,__FUNCTION__);
+
+
+    EXEC SQL CONTEXT USE :(m_RunTimeCntxt->iCtx);
+
+    Number lmsi = obj->getLmsi();   
+    memcpy( l_lmsi_c.arr, lmsi.getValue(), lmsi.getOriginalLength());
+    l_lmsi_c.len = lmsi.getOriginalLength();
+    l_lmsi_c.arr[l_lmsi_c.len] = '\0';
+
+    Number mnrf = obj->getMnrf();
+    memcpy( l_mnrf_c.arr, mnrf.getValue(), mnrf.getOriginalLength());
+    l_mnrf_c.len = mnrf.getOriginalLength();
+    l_mnrf_c.arr[l_mnrf_c.len] = '\0';
+
+    Number mcef = obj->getMcef();
+    memcpy( l_mcef_c.arr, mcef.getValue(), mcef.getOriginalLength());
+    l_mcef_c.len = mcef.getOriginalLength();
+    l_mcef_c.arr[l_mcef_c.len] =  '\0';
+
+    Number mnrr_gsm = obj->getMnrrGsm();
+    memcpy( l_mnrr_c_gsm.arr, mnrr_gsm.getValue(), mnrr_gsm.getOriginalLength());
+    l_mnrr_c_gsm.len = mnrr_gsm.getOriginalLength();
+    l_mnrr_c_gsm.arr[l_mnrr_c_gsm.len] =  '\0';
+
+    Number mnrr_gprs = obj->getMnrrGprs();
+    memcpy( l_mnrr_c_gprs.arr, mnrr_gprs.getValue(), mnrr_gprs.getOriginalLength());
+    l_mnrr_c_gprs.len = mnrr_gprs.getOriginalLength();
+    l_mnrr_c_gprs.arr[l_mnrr_c_gprs.len] =  '\0';
+
+    Number mnrg = obj->getMnrg();
+    memcpy( l_mnrg_c.arr, mnrg.getValue(), mnrg.getOriginalLength());
+    l_mnrg_c.len = mnrg.getOriginalLength();
+    l_mnrg_c.arr[l_mnrg_c.len] =  '\0';
+
+
+    Number msNotReachableFlagForGsm = obj->getMsNotReachableFlagForGsm();
+    memcpy( l_notreachableGsm_c.arr, msNotReachableFlagForGsm.getValue(), msNotReachableFlagForGsm.getOriginalLength() );
+    l_notreachableGsm_c.len = msNotReachableFlagForGsm.getOriginalLength();
+    l_notreachableGsm_c.arr[l_notreachableGsm_c.len] =  '\0';
+
+    Number msNotReachableFlagForGprs = obj->getMsNotReachableFlagForGprs();
+    memcpy( l_notreachableGprs_c.arr, msNotReachableFlagForGprs.getValue(), msNotReachableFlagForGprs.getOriginalLength() );
+    l_notreachableGprs_c.len = msNotReachableFlagForGprs.getOriginalLength();
+    l_notreachableGprs_c.arr[l_notreachableGprs_c.len] =  '\0';
+
+
+    char sgsnAddr_temp[SGSNADDR_SIZE+1];
+    Number sgsnaddr = obj->getSgsnAddress();
+
+    int sgsnaddrlen = sgsnaddr.getOriginalLength();   
+    memcpy(sgsnAddr_temp, sgsnaddr.getValue(),sgsnaddrlen); 
+    l_sgsnAddress_c.len = BCDEncoderobj.BCDToChar( (char *)l_sgsnAddress_c.arr ,sgsnAddr_temp, sgsnaddrlen);
+    l_sgsnAddress_c.arr[l_sgsnAddress_c.len] = '\0';
+
+    char sgsnNum_temp[SGSNNUM_SIZE +1];
+    Number sgsnnum = obj->getSgsnNumber();
+
+    int sgsnlen = sgsnnum.getOriginalLength();
+    memcpy(sgsnNum_temp, sgsnnum.getValue(),  sgsnlen);
+    l_sgsnNumber_c.len = BCDEncoderobj.BCDToChar( (char *)l_sgsnNumber_c.arr ,sgsnNum_temp, sgsnlen);
+    l_sgsnNumber_c.arr[l_sgsnNumber_c.len] = '\0';
+
+    // Begin spell-2100
+
+    Number mspurgedNonGPRS = obj->getMsPurgedNonGprsFlag();
+    memcpy( l_mspurgedNonGprs_c.arr, mspurgedNonGPRS.getValue(), mspurgedNonGPRS.getOriginalLength());
+    l_mspurgedNonGprs_c.len = mspurgedNonGPRS.getOriginalLength();
+    l_mspurgedNonGprs_c.arr[l_mspurgedNonGprs_c.len] = '\0';
+
+    Number mspurgedGPRS = obj->getMsPurgedGPRSFlag();
+    memcpy( l_mspurgedGprs_c.arr, mspurgedGPRS.getValue(), mspurgedGPRS.getOriginalLength());
+    l_mspurgedGprs_c.len = mspurgedGPRS.getOriginalLength();
+    l_mspurgedGprs_c.arr[l_mspurgedGprs_c.len] = '\0';
+
+
+    // End spell-2100
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Imsi = %s |%s",(char *)l_imsi_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Msisdn = %s |%s",(char *)l_msisdn_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " lmsi = %s |%s",(char *)l_lmsi_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mnrf = %s |%s",(char *)l_mnrf_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mcef = %s |%s",(char *)l_mcef_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " MsPurgedNonGPRS = %s |%s",(char *)l_mspurgedNonGprs_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " MsPurgedGPRS = %s |%s",(char *)l_mspurgedGprs_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mnrr_gsm = %s |%s",(char *)l_mnrr_c_gsm.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mnrr_gprs = %s |%s",(char *)l_mnrr_c_gprs.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mnrg = %s |%s",(char *)l_mnrg_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " notreachableGsm = %s|%s",(char *)l_notreachableGsm_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " notreachableGprs = %s|%s",(char *)l_notreachableGprs_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " sgsnNumber = %s|%s",(char *)l_sgsnNumber_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " sgsnAddress = %s|%s",(char *)l_sgsnAddress_c.arr,__FUNCTION__);
+
+    EXEC SQL WHENEVER SQLERROR GOTO SQL_ERROR_OCCURED;
+    // execute the queries and get the values into host varibles.
+    //EXEC SQL WHENEVER NOT FOUND GOTO DATA_NOT_FOUND;
+
+    EXEC SQL WHENEVER NOT FOUND GOTO STMT1;
+
+    if (obj->getHlrTrSubscriberInfoUpdated())
+    {   
+      if(obj->getVlrSupportsSuperCharger())
+      {
+        queryIndex=1;
+        /*EXEC SQL UPDATE HLR_TR_SUB_GSM_INFO
+          SET MSPURGED_NONGPRS_FLAG =:l_mspurgedNonGprs_c, 
+              NOTREACHABLE_FLAG =:l_notreachableGsm_c,
+              MNRF =:l_mnrf_c,MCEF =:l_mcef_c, MNRR =:l_mnrr_c_gsm
+                WHERE ( IMSI =:l_imsi_c OR MSISDN =:l_msisdn_c );*/ //commented by surya for mundo_multi_imsi
+
+
+      }
+      else
+      {
+        queryIndex=2;
+        EXEC SQL UPDATE HLR_TR_SUB_GSM_INFO
+          //  SET LMSI =:l_lmsi_c, MNRF =:l_mnrf_c, 
+          SET MNRF =:l_mnrf_c,
+              MCEF =:l_mcef_c, MNRR =:l_mnrr_c_gsm
+                //NOTREACHABLE_FLAG =:l_notreachableGsm_c //spell-2.0.12.1
+                WHERE ( IMSI =:l_imsi_c OR MSISDN =:l_msisdn_c );
+      }
+    }
+STMT1:
+    EXEC SQL WHENEVER NOT FOUND GOTO STMT2;
+
+    queryIndex=3;
+  //  EXEC SQL SELECT NVL(SGSN_SUPPORTS_SUPER_CHARGER,0) INTO :l_superCharger_c_gprs 
+    //  FROM HLR_TR_SUB_GPRS_INFO WHERE (IMSI = :l_imsi_c OR MSISDN = :l_msisdn_c); //2.1.0.0 SuperCharger functionality 
+
+
+      EXEC SQL SELECT NVL(SGSN_SUPPORTS_SUPER_CHARGER,0) INTO :l_superCharger_c_gprs
+	  FROM (SELECT SGSN_SUPPORTS_SUPER_CHARGER  
+		 FROM HLR_TR_SUB_GPRS_INFO 
+		  WHERE (IMSI = :l_imsi_c OR MSISDN = :l_msisdn_c) 
+		   ORDER BY LAST_UPDATED_DATE DESC) WHERE ROWNUM = 1;
+
+    if (obj->getHlrTrGprsProfileUpdated())
+    {
+      if(obj->getSgsnSupportsSuperCharger())
+      {
+        queryIndex=4;
+        EXEC SQL UPDATE HLR_TR_SUB_GPRS_INFO
+          SET MSPURGED_FOR_GPRS =:l_mspurgedGprs_c, 
+              NOTREACHABLE_GPRS_FLAG =:l_notreachableGprs_c,
+              MNRG =:l_mnrg_c,MNRR =:l_mnrr_c_gprs,MCEF =:l_mcef_c
+                WHERE ( IMSI =:l_imsi_c OR MSISDN =:l_msisdn_c );
+      }
+      else
+      {
+        queryIndex=5;
+        EXEC SQL UPDATE HLR_TR_SUB_GPRS_INFO 
+          SET MNRG =:l_mnrg_c, MNRR =:l_mnrr_c_gprs,MCEF =:l_mcef_c //spell-2100
+          //        SGSN_NUMBER =:l_sgsnNumber_c,
+          //          SGSN_ADDRESS =:l_sgsnAddress_c
+          //NOTREACHABLE_GPRS_FLAG =:l_notreachableGprs_c //spell-2.0.12.1
+          WHERE  ( IMSI =:l_imsi_c OR MSISDN =:l_msisdn_c );
+      }
+    }
+STMT2:
+    if ( (obj->getHlrTrSubscriberInfoUpdated()) || (obj->getHlrTrGprsProfileUpdated()) )
+    {
+      EXEC SQL COMMIT ;  
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "Commited successfully |%s",__FUNCTION__);
+    }
+    else{ 
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "Both the Flags are FALSE |%s",__FUNCTION__);
+    }
+
+    //g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode)); 
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateSmsInfo |%s",__FUNCTION__);
+    return CODE_SQL_SUCCESS;
+  }
+  catch(...)
+  {
+    EXEC SQL ROLLBACK;
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Caught Exception|%s",__FUNCTION__);
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"SQL error occured at Query Index [%d] |%s",queryIndex,__FUNCTION__);
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateSmsInfo |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+DATA_NOT_FOUND: 
+  {
+    EXEC SQL ROLLBACK  ;
+    loggerObj.log(LM_INFO,__FILE__,__LINE__,0,0, "No Data Found |%s",__FUNCTION__);
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"SQL error occured at Query Index [%d] |%s",queryIndex,__FUNCTION__);
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateSmsInfo |%s",__FUNCTION__);
+    return ROWS_NOT_FOUND;
+  }
+SQL_ERROR_OCCURED:
+  {
+    EXEC SQL ROLLBACK  ;
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"SQL error occured at Query Index [%d] |%s",queryIndex,__FUNCTION__);
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Oracle Error code = %d, Mesg = %s |%s",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc, __FUNCTION__);
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving updateSmsInfo |%s",__FUNCTION__);
+    return PROC_CODE_ERROR;
+  }
+}
+
+ESqlRes SmsDbFunction::getSmsInfo(DataFromDb *obj,int trGprsTeledeleteFlag)
+{
+  struct sqlca sqlca;
+  unsigned long m_Index=1;
+  BCDEncoder BCDEncoderobj;
+
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Entering getSmsInfo |%s",__FUNCTION__);
+
+  char imsi_temp[IMSI_SIZE +1] ;
+  char msisdn_temp[MSISDN_SIZE +1] ;
+
+  Number imsi = obj->getImsi();
+  int imsi_len =  imsi.getOriginalLength();
+
+  Number msisdn=obj->getMsisdn();
+  int msisdn_len =  msisdn.getOriginalLength();
+
+
+  if ( imsi_len <= 0 && msisdn_len <=0  || imsi_len > IMSI_SIZE / 2 || msisdn_len > MSISDN_SIZE / 2 )
+  {
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, " IMSI and MSISDN check failed |%s",__FUNCTION__  );
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getSmsInfo |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+  memset(imsi_temp,  '\0',  sizeof(imsi_temp) );
+  memset(msisdn_temp, '\0', sizeof(msisdn_temp) );
+
+  memcpy(imsi_temp, imsi.getValue(), imsi_len);
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " BCD IMSI Len = %d|%s",imsi_len,__FUNCTION__);
+
+  memcpy(msisdn_temp,  msisdn.getValue(), msisdn_len);
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " BCD MSISDN Len = %d|%s",msisdn_len,__FUNCTION__);
+
+  EXEC SQL BEGIN DECLARE SECTION;
+
+  int count_test=0;
+  int 			l_profileid_i ;
+  int 			l_cnt_i ;
+  int       l_cnt_gprs_i;
+  int		  	l_count_i;
+  int			  l_color_i;
+  varchar		l_vlrNumber_c[VLR_SIZE +1];
+  varchar		l_imsi_c[IMSI_SIZE +1];
+  varchar		l_msisdn_c[MSISDN_SIZE +1];
+  varchar		l_temp_msisdn_c[MSISDN_SIZE +1];
+  varchar		l_lmsi_c[LMSI_SIZE +1];
+  varchar		l_mnrf_c[MNRF_SIZE + 1] ; 
+  int		l_mcef_c;
+  int		l_mcef_c_gprs;
+  varchar		l_mnrr_c_gsm[MNRR_SIZE +1] = {'\0'};
+  varchar		l_mnrr_c_gprs[MNRR_SIZE +1]= {'\0'};
+  varchar		l_mscSupportsMtSms_c[MSCSUPMTSMS_SIZE +1];
+  varchar		l_mscNumber_c[MSCNUM_SIZE +1];
+  varchar		l_notreachableGsm_c[NOTREACHABLE_SIZE +1];
+  varchar   l_msNotReachableInMscStatus[NOTREACHABLE_SIZE +1];//mohan added Mar15 2009
+  varchar   l_mspurged_nongprs_flag[NOTREACHABLE_SIZE +1];//mohan added Mar15 2009
+  varchar		l_notreachableGprs_c[NOTREACHABLE_SIZE +1];
+  varchar   l_msNotReachableInSgsnStatus[NOTREACHABLE_SIZE +1];//mohan added Mar15 2009
+  varchar   l_mspurged_gprs_flag[NOTREACHABLE_SIZE +1];//mohan added Mar15 2009
+  varchar		l_sgsnNumber_c[SGSNNUM_SIZE + 1];
+  varchar		l_sgsnSupportsMtSms_c[SGSNSUPMTSMS_SIZE +1];
+  varchar		l_sgsnAddress_c[SGSNADDR_SIZE +1];
+  varchar		l_mnrg_c[MNRG_SIZE +1];
+  varchar		l_networkAccessMode_c[NTACCESSMODE_SIZE +1];
+  varchar		l_ssbarring_c[SSBARR_SIZE +1];
+  varchar   l_mtodbBarring_value[OPERBARR_SIZE];
+  varchar   l_vlrNumberPresent_value[VLR_SIZE];
+  varchar   l_sgsnNumberPresent_value[SGSNNUM_SIZE];
+  varchar   l_substateActiveGsm_value[GSM_ACTIVE_STATE_SIZE];
+  varchar   l_substateActiveGprs_value[GPRS_ACTIVE_STATE_SIZE];
+  varchar   l_operatorBarringGsm_c[OPERBARR_SIZE];
+  varchar   l_operatorBarringGprs_c[OPERBARR_SIZE]; //spell-2.0.13.1
+  varchar		l_mtSmsProvisioned_c[MTSMSPRO_SIZE +1];
+  varchar		l_imsi[IMSI_SIZE +1];
+  varchar		l_msisdn[MSISDN_SIZE +1];
+  unsigned int 		l_operatorBarring_value; //actually it is of size 10
+  char			l_subscriber_state;
+  char			l_trace_required;
+  varchar		l_subscriber_state_gsm_c[GSM_ACTIVE_STATE_SIZE +1];
+  varchar		l_subscriber_state_gprs_c[GPRS_ACTIVE_STATE_SIZE +1];
+  //char		l_subscriber_state_gsm = '\0';
+  //char		l_subscriber_state_gprs = '\0';
+  char			l_trace_required_gsm = '\0';
+  char			l_trace_required_gprs = '\0';
+  unsigned int           l_gsm_active_roaming_subs_profile_id = 0; //2.0.10.0 - Roaming profile change
+  unsigned int           l_gprs_active_roaming_subs_profile_id = 0; //2.0.10.0 - Roaming profile change
+  varchar		 l_NetworkId[IMSI_SIZE] = {'\0'};
+  varchar		 l_hlr_c[IMSI_SIZE] = {'\0'};
+  varchar		 l_smsc_c[IMSI_SIZE] = {'\0'};
+  varchar    l_roaming_status[3]  = {'\0'};
+  varchar    l_gprs_roaming_status[3]  = {'\0'};
+  varchar		l_superCharger_c_gsm[SUPERCHARGERSUPPORTSINVLR_SIZE +1] = {'\0'}; //spell-2100
+  varchar		l_superCharger_c_gprs[SUPERCHARGERSUPPORTSINSGSN_SIZE +1] = {'\0'};
+  //2.0.13.1 Begin
+
+  unsigned int l_gsmOdbinducedBarring;		//Changed data type long to unsigned int due to Oracle error
+  unsigned int l_gprsOdbinducedBarring;		
+
+  int tr_gsm_row_count = 0;
+  int tr_gprs_row_count = 0;
+  //2.0.13.1 End
+  EXEC SQL END DECLARE SECTION;
+
+  //copy input params to the host variables
+
+  memset(&l_vlrNumber_c,  '\0',sizeof(l_vlrNumber_c) );
+  memset(&l_imsi_c,  '\0',  sizeof(l_imsi_c) );
+  memset(&l_temp_msisdn_c, '\0', sizeof(l_temp_msisdn_c));
+  memset(&l_msisdn_c, '\0', sizeof(l_msisdn_c) );
+  memset(&l_lmsi_c, '\0',   sizeof(l_lmsi_c) );
+  memset(&l_mnrg_c,  '\0',  sizeof(l_mnrg_c) );
+  memset(&l_mnrf_c,  '\0',  sizeof(l_mnrf_c) );
+  /*memset(&l_mcef_c,  '\0',  sizeof(l_mcef_c) );*/
+  /*memset(&l_mnrr_c,  '\0',  sizeof(l_mnrr_c) );*/
+  l_mcef_c=0;
+  l_mcef_c_gprs=0;
+  memset(&l_sgsnAddress_c,  '\0',  sizeof(l_sgsnAddress_c));
+  memset(&l_sgsnNumber_c,  '\0',  sizeof(l_sgsnNumber_c));
+  memset(&l_mscSupportsMtSms_c,  '\0',  sizeof(l_mscSupportsMtSms_c));
+  memset(&l_mscNumber_c,  '\0',  sizeof(l_mscNumber_c));
+  memset(&l_notreachableGsm_c,  '\0',  sizeof(l_notreachableGsm_c));
+  memset(&l_msNotReachableInMscStatus,  '\0',  sizeof(l_msNotReachableInMscStatus));
+  memset(&l_mspurged_nongprs_flag,  '\0',  sizeof(l_mspurged_nongprs_flag));
+  memset(&l_notreachableGprs_c,  '\0',  sizeof(l_notreachableGprs_c));
+  memset(&l_msNotReachableInSgsnStatus,  '\0',  sizeof(l_msNotReachableInSgsnStatus));
+  memset(&l_mspurged_gprs_flag,  '\0',  sizeof(l_mspurged_gprs_flag));
+  memset(&l_sgsnSupportsMtSms_c,  '\0',  sizeof(l_sgsnSupportsMtSms_c));
+  memset(&l_networkAccessMode_c,  '\0',  sizeof(l_networkAccessMode_c));
+  memset(&l_ssbarring_c,'\0',sizeof(l_ssbarring_c));
+  memset(&l_mtodbBarring_value,'\0',sizeof(l_mtodbBarring_value)); //2.0.13.1_Rev1
+  memset(&l_vlrNumberPresent_value,'\0',sizeof(l_vlrNumberPresent_value)); //2100
+  memset(&l_sgsnNumberPresent_value,'\0',sizeof(l_sgsnNumberPresent_value)); //2100
+
+  memset(&l_substateActiveGsm_value,'\0',sizeof(l_substateActiveGsm_value)); //2i.0.15.4
+  memset(&l_substateActiveGprs_value,'\0',sizeof(l_substateActiveGprs_value)); //2.0.16.0
+  memset(&l_operatorBarringGsm_c,  '\0',  sizeof(l_operatorBarringGsm_c));
+  memset(&l_operatorBarringGprs_c,  '\0',  sizeof(l_operatorBarringGprs_c));
+  memset(&l_mtSmsProvisioned_c,  '\0',  sizeof(l_mtSmsProvisioned_c));
+  memset(&l_imsi,  '\0',  sizeof(l_imsi) );
+  memset(&l_msisdn, '\0', sizeof(l_msisdn) );
+  memset(&l_subscriber_state_gsm_c,  '\0',  sizeof(l_subscriber_state_gsm_c));
+  memset(&l_subscriber_state_gprs_c,  '\0',  sizeof(l_subscriber_state_gprs_c));
+  memset(&l_superCharger_c_gsm, '\0', sizeof(l_superCharger_c_gsm));
+  memset(&l_superCharger_c_gprs, '\0', sizeof(l_superCharger_c_gprs));
+  
+ 
+
+  l_subscriber_state = '\0';
+  l_trace_required = '\0';
+
+  l_operatorBarring_value = 0;
+  l_color_i = 0;
+  l_profileid_i  = 0;
+  l_count_i = 0;
+  l_cnt_i   =0;
+  l_cnt_gprs_i = 0;
+  Number subscriberState(30);
+  bool flag_gsm=false;
+  bool isJumpTrue=false;
+  bool isgsmSubscriberiActive=false;
+  bool isgprsSubscriberiActive=false;
+
+  //2.0.13.1 Begin
+  l_gsmOdbinducedBarring = 0;		
+  l_gprsOdbinducedBarring = 0;		
+  //2.0.13.1 End
+
+  if ((obj->dbConnObj==NULL) || (obj == NULL))
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Given connection pool is null or obj is null|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getSmsInfo |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }	
+
+  unsigned int queryIndex = 0;
+  DbConnectionObject*  m_RunTimeCntxt =NULL;
+  m_RunTimeCntxt = (DbConnectionObject*)obj->dbConnObj;
+  if (m_RunTimeCntxt==NULL)
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"DB Connection Object Could not be Acquired|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getSmsInfo |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+  try
+  {
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "Connection Object Acquired|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, (char *)"SUCC::  Index :%ld |%s|",m_Index,__FUNCTION__);
+
+    EXEC SQL CONTEXT USE :(m_RunTimeCntxt->iCtx);
+
+    l_imsi_c.len = BCDEncoderobj.BCDToChar( (char *)l_imsi_c.arr ,imsi_temp, imsi_len);
+    l_imsi_c.arr[l_imsi_c.len] = '\0';
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " CHAR IMSI = %s| Len = %d |%s",(char *)l_imsi_c.arr,l_imsi_c.len,__FUNCTION__);
+
+    l_msisdn_c.len = BCDEncoderobj.BCDToChar( (char *)l_msisdn_c.arr, &msisdn_temp[1], msisdn_len-1);
+    l_msisdn_c.arr[l_msisdn_c.len] = '\0';
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " CHAR MSISDN = %s| and MSISDN Len = %d |%s",(char *)l_msisdn_c.arr,l_msisdn_c.len,__FUNCTION__);
+
+    EXEC SQL WHENEVER SQLERROR GOTO SQL_ERROR_OCCURED;
+    EXEC SQL WHENEVER NOT FOUND CONTINUE;
+    //bool flag_gsm=false;
+
+    /* queryIndex=1;
+       EXEC SQL SELECT count(*) INTO tr_gsm_row_count FROM HLR_TR_SUB_GSM_INFO WHERE (IMSI = :l_imsi_c OR MSISDN = :l_msisdn_c);  
+       queryIndex=2;
+       EXEC SQL SELECT count(*) INTO tr_gprs_row_count FROM HLR_TR_SUB_GPRS_INFO WHERE (IMSI = :l_imsi_c OR MSISDN = :l_msisdn_c);  */
+
+
+
+    strcpy((char*)l_temp_msisdn_c.arr, (const char*)l_msisdn_c.arr);
+
+    queryIndex=1;
+
+    EXEC SQL SELECT IMSI INTO :l_imsi_c
+      FROM (SELECT IMSI
+             FROM HLR_TR_SUB_GSM_INFO A WHERE A.MSISDN = :l_msisdn_c
+           ORDER BY LAST_UPDATED_DATE DESC) A WHERE ROWNUM = 1; // Added for SMSM multi_imsi test
+      strcpy((char*)l_temp_msisdn_c.arr, (const char*)l_msisdn_c.arr);
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Temp MSISDN = %s|%s",l_temp_msisdn_c.arr,__FUNCTION__);
+      memset(&l_msisdn_c, '\0', sizeof(l_msisdn_c));
+    
+    EXEC SQL SELECT NVL(ACTIVE_ROAMING_PROFILE_ID,0) INTO :l_gsm_active_roaming_subs_profile_id 
+      FROM HLR_TR_SUB_GSM_INFO WHERE (IMSI = :l_imsi_c OR MSISDN = :l_msisdn_c); //2.0.10.0 - Roaming profile change
+
+      loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, " Active_roaming_profile_id for GSM is =%d |%s",l_gsm_active_roaming_subs_profile_id,__FUNCTION__);
+
+    
+    EXEC SQL WHENEVER NOT FOUND GOTO GPRS_QUERY;
+    // - Start Change for 2.0.13.1_Rev1
+    queryIndex=2;
+    EXEC SQL SELECT NVL(GENERAL_ODB_DATA, 4177526784 ) 
+      INTO :l_operatorBarring_value FROM HLR_MT_SUB_ODB_DATA 
+      WHERE (IMSI=:l_imsi_c OR MSISDN= :l_msisdn_c) AND (ACTIVE_ROAMING_PROFILE_ID = :l_gsm_active_roaming_subs_profile_id AND
+          ACTIVE_ROAMING_PROFILE_ID_GPRS = :l_gprs_active_roaming_subs_profile_id); 
+
+    // End Change for 2.0.13.1_Rev1
+
+
+    //2.0.10.0 - Roaming profile change
+    queryIndex=3;
+    EXEC SQL SELECT NVL(IMSI, 0),NVL(MSISDN, 0),NVL( SUBSCRIBER_STATE, 0 ),NVL( TRACE_REQUIRED, 0 ), NVL(NETWORK_ACCESS_MODE, 0), NVL(NETWORK_ID,0)
+      INTO :l_imsi, :l_msisdn, :l_subscriber_state_gsm_c, :l_trace_required_gsm, :l_networkAccessMode_c, :l_NetworkId
+      FROM HLR_MT_SUB_GSM_INFO
+      WHERE (IMSI = :l_imsi_c OR MSISDN = :l_msisdn_c) AND ACTIVE_ROAMING_PROFILE_ID = :l_gsm_active_roaming_subs_profile_id;
+
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, " Retrieving data from the HLR_MT_SUB_GSM_INFO <IMSI =%s> <MSISDN=%s><networkAccessMode = %s><NetworkId =%s><subscriber_state_gsm = %c><trace_required_gsm = %c>|%s",(char*)l_imsi.arr,(char*)l_msisdn.arr,(char*)l_networkAccessMode_c.arr,(char*)l_NetworkId.arr,l_subscriber_state_gsm_c,l_trace_required_gsm,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " 1 After Gsm Query Completes|%s",__FUNCTION__);
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " networkAccessMode afetr Retrieving from DB = %s|%s",(char *)l_networkAccessMode_c.arr,__FUNCTION__);
+
+    queryIndex=4;
+    //EXEC SQL SELECT DISTINCT NVL(HLR_NUMBER,' ') INTO :l_hlr_c FROM HLR_MT_PLMN_DETAILS WHERE NETWORK_ID = :l_NetworkId;
+    //2.1.1.0 Mobily Requirement multiple PLMN and CC support
+    EXEC SQL SELECT NVL(HLR_NUMBER,' '),NVL(SMSC_NUMBER, ' ') INTO :l_hlr_c,:l_smsc_c FROM HLR_MT_PLMN_DETAILS WHERE NETWORK_ID = :l_NetworkId and CC||NDC = SUBSTR(:l_temp_msisdn_c, 1, LENGTH(CC||NDC));
+
+    l_hlr_c.arr[l_hlr_c.len] = '\0';
+    if ( !((l_hlr_c.arr[0] == ' ') && (l_hlr_c.len == 1)) )
+    {
+      Number hlrid(30);
+      hlrid.setValue((char *)l_hlr_c.arr, l_hlr_c.len);
+      obj->setHlrNumber(hlrid);
+    }
+
+    l_smsc_c.arr[l_smsc_c.len] = '\0';
+    if ( !((l_smsc_c.arr[0] == ' ') && (l_smsc_c.len == 1)) )
+    {
+      Number smscid(30);
+      smscid.setValue((char *)l_smsc_c.arr, l_smsc_c.len);
+      obj->setSmscNumber(smscid);
+    }
+
+    flag_gsm = true;
+
+GPRS_QUERY:
+    EXEC SQL WHENEVER NOT FOUND GOTO STAT2;
+
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, " Active_roaming_profile_id for GPRS is =%d |%s",l_gprs_active_roaming_subs_profile_id,__FUNCTION__);
+
+    //2.0.10.0 - Roaming profile change
+    queryIndex=5;
+    EXEC SQL SELECT NVL(IMSI, 0),NVL(MSISDN, 0),NVL( SUBSCRIBER_STATE, 0 ),NVL( TRACE_REQUIRED, 0 ), NVL(NETWORK_ACCESS_MODE, 0),  NVL(NETWORK_ID,0)
+      INTO :l_imsi, :l_msisdn, :l_subscriber_state_gprs_c, :l_trace_required_gprs,  :l_networkAccessMode_c, :l_NetworkId
+      FROM HLR_MT_SUB_GPRS_INFO
+      WHERE (IMSI = :l_imsi_c OR MSISDN = :l_msisdn_c) AND ACTIVE_ROAMING_PROFILE_ID = :l_gprs_active_roaming_subs_profile_id;
+    isJumpTrue=true;
+
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, " Afetr Retrieving from DB table HLR_MT_SUB_GPRS_INFO <IMSI =%s>, <MSISDN=%s>, <networkAccessMode = %s>,<NetWorkId = %s>,<subscriber_state_gprs = %s,<trace_required_gsm = %c> |%s",(char*)l_imsi.arr,(char*)l_msisdn.arr,(char *)l_networkAccessMode_c.arr,(char*)l_NetworkId.arr,l_subscriber_state_gprs_c.arr,l_trace_required_gprs,__FUNCTION__);
+
+    queryIndex=6;
+    //EXEC SQL SELECT DISTINCT NVL(HLR_NUMBER,' ') INTO :l_hlr_c FROM HLR_MT_PLMN_DETAILS WHERE NETWORK_ID = :l_NetworkId;
+    //2.1.1.0 Mobily Requirement multiple PLMN and CC support
+    //DB Query Tuning, Release_2141
+    if(l_hlr_c.arr[0] == ' ') //Release_2141
+    {
+      EXEC SQL SELECT NVL(HLR_NUMBER,' '),NVL(SMSC_NUMBER, ' ') INTO :l_hlr_c,:l_smsc_c FROM HLR_MT_PLMN_DETAILS WHERE NETWORK_ID = :l_NetworkId and CC||NDC = SUBSTR(:l_temp_msisdn_c, 1, LENGTH(CC||NDC));
+
+      l_hlr_c.arr[l_hlr_c.len] = '\0';
+      if ( !((l_hlr_c.arr[0] == ' ') && (l_hlr_c.len == 1)) )
+      {
+        Number hlrid(30);
+        hlrid.setValue((char *)l_hlr_c.arr, l_hlr_c.len);
+        obj->setHlrNumber(hlrid);
+      }
+    }
+    l_smsc_c.arr[l_smsc_c.len] = '\0';
+    if ( !((l_smsc_c.arr[0] == ' ') && (l_smsc_c.len == 1)) )
+    {
+      Number smscid(30);
+      smscid.setValue((char *)l_smsc_c.arr, l_smsc_c.len);
+      obj->setSmscNumber(smscid);
+    }
+
+STAT2:
+    if((isJumpTrue==false) && (flag_gsm==false))
+    {
+      goto DATA_NOT_FOUND;
+    }
+    l_networkAccessMode_c.arr[l_networkAccessMode_c.len] = '\0';
+    l_NetworkId.arr[ l_NetworkId.len]=  '\0';
+
+    //Begin spell-2.0.16.0
+
+    l_subscriber_state_gsm_c.arr[l_subscriber_state_gsm_c.len] = '\0';
+    l_subscriber_state_gprs_c.arr[ l_subscriber_state_gprs_c.len]= '\0';
+
+    if(!((l_subscriber_state_gsm_c.arr[0] == 0x30) && (l_subscriber_state_gsm_c.len == 1)))
+    {
+      Number subStateGsm(30);
+      subStateGsm.setValue((char *)l_subscriber_state_gsm_c.arr,l_subscriber_state_gsm_c.len);
+      obj->setSubStateGsm(subStateGsm);
+    }
+    else
+    {
+      l_substateActiveGsm_value.len=1;
+      memcpy((char *)l_substateActiveGsm_value.arr, "0",l_substateActiveGsm_value.len);
+      Number gsmSubActive(30);
+      gsmSubActive.setValue((char *)l_substateActiveGsm_value.arr,l_substateActiveGsm_value.len);
+      obj->setSubStateGsm(gsmSubActive);
+    }
+
+    if(!((l_subscriber_state_gprs_c.arr[0] == 0x30) && (l_subscriber_state_gprs_c.len == 1)))
+    {
+      Number subStateGprs(30);
+      subStateGprs.setValue((char *)l_subscriber_state_gprs_c.arr,l_subscriber_state_gprs_c.len);
+      obj->setSubStateGprs(subStateGprs);
+    }
+    else
+    {
+      l_substateActiveGprs_value.len=1;
+      memcpy((char *)l_substateActiveGprs_value.arr, "0",l_substateActiveGprs_value.len);
+      Number gprsSubActive(30);
+      gprsSubActive.setValue((char *)l_substateActiveGprs_value.arr,l_substateActiveGprs_value.len);
+      obj->setSubStateGprs(gprsSubActive);
+    }
+    //End spell-2.0.16.0
+
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " flag= %d |%s",flag_gsm,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " isJumpTrue flag= %d |%s",isJumpTrue,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_subscriber_state_gsm = %s |%s",(char*)l_subscriber_state_gsm_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_subscriber_state_gprs= %s |%s",(char*)l_subscriber_state_gprs_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_trace_required_gsm = %d |%s",l_trace_required_gsm,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_subscriber_state_gprs = %d |%s",l_subscriber_state_gprs_c,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_trace_required_gprs = %d |%s",l_trace_required_gprs,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " networkAccessMode = %s|%s",(char *)l_networkAccessMode_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_NetworkId = %s|%s",(char *)l_NetworkId.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_hlr address = %s|%s",(char *)l_hlr_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_smsc address = %s|%s",(char *)l_smsc_c.arr,__FUNCTION__);
+
+
+    /*l_subscriber_state = l_subscriber_state_gsm?l_subscriber_state_gsm:l_subscriber_state_gprs;
+      subscriberState.setValue(&l_subscriber_state, 1);
+      obj->setSubscriberState(subscriberState);*/
+    l_trace_required = l_trace_required_gsm?l_trace_required_gsm:l_trace_required_gprs;
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_subscriber_state = %c |%s",l_subscriber_state,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_trace_required = %c |%s",l_trace_required,__FUNCTION__);
+
+    /*subscriberState.setValue(&l_subscriber_state, 1);
+      obj->setSubscriberState( subscriberState );*/
+
+
+    if( !((l_NetworkId.arr[0] == 0x30) && (l_NetworkId.len == 1)) )
+    {
+      Number nwid(30);
+      nwid.setValue((char *)l_NetworkId.arr, l_NetworkId.len);
+      obj->setNetworkId( nwid);
+    }
+
+    int q1_flag =0;
+    int q2_flag =0;
+
+    EXEC SQL WHENEVER NOT FOUND GOTO QUERY2;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " INSIDE QUERY2...|%s",__FUNCTION__);
+    queryIndex=7;
+    EXEC SQL SELECT NVL( LMSI, 0) , NVL(MNRF, 0) , NVL( MCEF, 0) , NVL( MNRR, 0) , NVL( MSC_NUMBER, 0),
+         NVL( NOTREACHABLE_FLAG, 0),NVL(MSC_AREA_RESTRIC_FLAG, 0),NVL(MSISDN, 0), NVL(ROAMING_STATUS,0),
+         NVL(MSPURGED_NONGPRS_FLAG,0),NVL(VLR_SUPPORTS_SUPER_CHARGER,0),NVL(VLR_NUMBER,0),NVL(ODB_INDUCED_BARR_DATA,0) 
+           INTO :l_lmsi_c, :l_mnrf_c, :l_mcef_c, :l_mnrr_c_gsm, :l_mscNumber_c, 
+         :l_notreachableGsm_c,:l_msNotReachableInMscStatus,:l_msisdn,:l_roaming_status,
+         :l_mspurged_nongprs_flag,:l_superCharger_c_gsm, :l_vlrNumber_c, :l_gsmOdbinducedBarring FROM  HLR_TR_SUB_GSM_INFO WHERE (IMSI = :l_imsi_c OR MSISDN= :l_msisdn_c);//  AND (MSPURGED_NONGPRS_FLAG = '0' OR MSPURGED_NONGPRS_FLAG is NULL);
+    q1_flag =1;
+    if (l_msNotReachableInMscStatus.arr[0]!='1') //mohan added Mar15 2009
+    {
+      l_msNotReachableInMscStatus.arr[0] = l_mspurged_nongprs_flag.arr[0];
+    }
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, " <IMSI = %s><MSISDN=%s><MSC_NUMBER=%s><NOTREACHABLE_FLAG=%s><MSC_AREA_RESTRIC_FLAG=%s><ROAMING_STATUS=%s><VLR_NUMBER=%s> from HLR_TR_SUB_GSM_INFO ...|%s",(char*)l_lmsi_c.arr,(char*)l_msisdn.arr,(char*)l_mscNumber_c.arr,(char*)l_notreachableGsm_c.arr,(char*)l_msNotReachableInMscStatus.arr,(char*)l_roaming_status.arr,(char*)l_vlrNumber_c.arr,__FUNCTION__);
+
+QUERY2:
+    EXEC SQL WHENEVER NOT FOUND GOTO QUERY3;
+    queryIndex=8;
+    EXEC SQL SELECT NVL( SGSN_NUMBER, 0), NVL( SGSN_ADDRESS, 0),NVL( MNRR, 0), 
+         NVL( MNRG, 0), NVL( NOTREACHABLE_GPRS_FLAG,0),NVL(SGSN_AREA_RESTRICTED_FLAG, 0),
+         NVL(MSISDN, 0), NVL( MCEF, 0) , NVL(ROAMING_STATUS,0),NVL(MSPURGED_FOR_GPRS,0),NVL(SGSN_SUPPORTS_SUPER_CHARGER,0),NVL(ODB_INDUCED_BARR_DATA,0) INTO :l_sgsnNumber_c, :l_sgsnAddress_c, :l_mnrr_c_gprs,:l_mnrg_c,:l_notreachableGprs_c,
+         :l_msNotReachableInSgsnStatus,:l_msisdn, :l_mcef_c_gprs, :l_gprs_roaming_status,
+         :l_mspurged_gprs_flag, :l_superCharger_c_gprs, :l_gprsOdbinducedBarring FROM  HLR_TR_SUB_GPRS_INFO  WHERE (IMSI = :l_imsi_c OR MSISDN= :l_msisdn_c); // AND (MSPURGED_FOR_GPRS = '0' OR MSPURGED_FOR_GPRS is NULL);
+
+    q2_flag =1;
+    if (l_msNotReachableInSgsnStatus.arr[0]!='1')//mohan added Mar15 2009
+    {
+      l_msNotReachableInSgsnStatus.arr[0] = l_mspurged_gprs_flag.arr[0];
+    }
+
+QUERY3:
+
+    /*if (!(q1_flag || q2_flag))
+      goto DATA_NOT_FOUND;*/
+    if (!(q1_flag || q2_flag))
+      goto ABSENT_SUBSCRIBER;
+
+    l_imsi.arr[l_imsi.len] = '\0';
+    l_msisdn.arr[l_msisdn.len] = '\0';
+    l_lmsi_c.arr[l_lmsi_c.len] = '\0';
+    l_mnrf_c.arr[l_mnrf_c.len] = '\0';
+    /*l_mcef_c.arr[l_mcef_c.len] = '\0';*/
+    l_mnrr_c_gsm.arr[l_mnrr_c_gsm.len] = '\0';
+    l_mnrr_c_gprs.arr[l_mnrr_c_gprs.len] = '\0';
+    l_mscNumber_c.arr[l_mscNumber_c.len] = '\0';
+    l_vlrNumber_c.arr[l_vlrNumber_c.len] = '\0';
+    l_notreachableGsm_c.arr[l_notreachableGsm_c.len] = '\0';
+    l_msNotReachableInMscStatus.arr[l_msNotReachableInMscStatus.len] = '\0';
+    // l_sgsnSupportsMtSms_c.arr[l_sgsnSupportsMtSms_c.len] = '\0';
+    l_sgsnNumber_c.arr[l_sgsnNumber_c.len] = '\0';
+    l_sgsnAddress_c.arr[l_sgsnAddress_c.len] = '\0';
+    l_mnrg_c.arr[l_mnrg_c.len] = '\0';
+    l_notreachableGprs_c.arr[l_notreachableGprs_c.len] = '\0';
+    l_msNotReachableInSgsnStatus.arr[l_msNotReachableInSgsnStatus.len] = '\0';
+    l_roaming_status.arr[l_roaming_status.len]='\0';
+    l_gprs_roaming_status.arr[l_gprs_roaming_status.len]='\0';
+
+    // Begin spell-2100
+    l_mspurged_nongprs_flag.arr[l_mspurged_nongprs_flag.len]='\0';
+    l_mspurged_gprs_flag.arr[l_mspurged_gprs_flag.len]='\0';
+
+    l_superCharger_c_gsm.arr[l_superCharger_c_gsm.len]='\0';
+    l_superCharger_c_gprs.arr[l_superCharger_c_gprs.len]='\0';
+
+    // End spell-2100
+    EXEC SQL WHENEVER NOT FOUND GOTO DATA_NOT_FOUND;
+
+    if(l_networkAccessMode_c.arr[0]!='1')
+    {
+      queryIndex=9;
+      EXEC SQL SELECT COUNT(1) INTO :l_mscSupportsMtSms_c
+        FROM HLR_TR_GSM_BEARER_TELE_DATA 
+        WHERE IMSI =:l_imsi AND BEARER_TELE_CODE=33
+        AND BEARER_TELE_TYPE =2 AND BEARER_TELE_STATUS=1 
+        AND ACTIVE_ROAMING_PROFILE_ID = :l_gsm_active_roaming_subs_profile_id; //2.0.10.0 - Roaming profile change
+
+      if(l_networkAccessMode_c.arr[0]=='2')//mohan added 11-12-08
+      {
+        queryIndex=10;
+        EXEC SQL SELECT COUNT(1) INTO :l_sgsnSupportsMtSms_c
+          FROM HLR_TR_GPRS_BEARER_TELE_DATA
+          WHERE IMSI =:l_imsi AND BEARER_TELE_CODE=33
+          AND BEARER_TELE_TYPE =2 AND BEARER_TELE_STATUS=1 
+          AND ACTIVE_ROAMING_PROFILE_ID = :l_gprs_active_roaming_subs_profile_id; //2.0.10.0 - Roaming profile change
+      }
+    }
+    else
+    {
+      queryIndex=11;
+      EXEC SQL SELECT COUNT(1) INTO :l_sgsnSupportsMtSms_c
+        FROM HLR_TR_GPRS_BEARER_TELE_DATA 
+        WHERE IMSI =:l_imsi AND BEARER_TELE_CODE=33
+        AND BEARER_TELE_TYPE =2 AND BEARER_TELE_STATUS=1 
+        AND ACTIVE_ROAMING_PROFILE_ID = :l_gprs_active_roaming_subs_profile_id; //2.0.10.0 - Roaming profile change
+    }
+    l_mscSupportsMtSms_c.arr[l_mscSupportsMtSms_c.len] = '\0';
+    l_sgsnSupportsMtSms_c.arr[l_sgsnSupportsMtSms_c.len] = '\0';
+
+    //2.0.10.0 - Roaming profile change
+
+    //Rajesh, 30/07/2013 .A flag was introduced whether to read data from Hlr_tr_gprs_bearer_tele_data
+    //or from Hlr_mt_gprs_bearer_tele_data in the release 2.1.8.0.This flag was come to picture
+    //as it was observed that data from the Hlr_tr_gprs_bearer_tele_data table were deleted and  
+    //l_mtSmsProvisioned_c flag is overlapped with 0 when data was not found in the 
+    // Hlr_tr_gprs_bearer_tele_data  corresponding table and subsequently mt-sms was failing
+    // (Investigation is on to find out how data is deleted  from table).
+
+    if(trGprsTeledeleteFlag)
+    {
+      if(l_networkAccessMode_c.arr[0]!='1')
+      {
+        //07/02/2012(While creating profile SMS has not provisioned for a subscriber,
+        //later on, SMSM service is added to the subscriber but MTSms was failing)//spell-2100 
+        queryIndex=12;
+
+        EXEC SQL SELECT COUNT(1) INTO :l_mtSmsProvisioned_c
+          FROM HLR_MT_SUB_GSM_INFO A, HLR_TR_GSM_BEARER_TELE_DATA B
+          WHERE (A.IMSI=:l_imsi_c OR A.MSISDN=:l_msisdn_c)
+          AND A.ACTIVE_ROAMING_PROFILE_ID = :l_gsm_active_roaming_subs_profile_id
+          AND A.IMSI = B.IMSI AND A.ACTIVE_ROAMING_PROFILE_ID = B.ACTIVE_ROAMING_PROFILE_ID
+          AND B.BEARER_TELE_CODE=33 AND B.BEARER_TELE_TYPE = '2';
+
+        if(l_networkAccessMode_c.arr[0]=='2')
+        {
+          EXEC SQL SELECT COUNT(1) INTO :l_mtSmsProvisioned_c
+            FROM HLR_MT_SUB_GPRS_INFO A, HLR_TR_GPRS_BEARER_TELE_DATA B
+            WHERE (A.IMSI=:l_imsi_c OR A.MSISDN=:l_msisdn_c)
+            AND A.ACTIVE_ROAMING_PROFILE_ID = :l_gprs_active_roaming_subs_profile_id
+            AND A.IMSI = B.IMSI AND A.ACTIVE_ROAMING_PROFILE_ID = B.ACTIVE_ROAMING_PROFILE_ID
+            AND B.BEARER_TELE_CODE=33 AND B.BEARER_TELE_TYPE = '2';
+        }
+      }
+      else
+      {
+        queryIndex=13;
+        EXEC SQL SELECT COUNT(1) INTO :l_mtSmsProvisioned_c
+          FROM HLR_MT_SUB_GPRS_INFO A, HLR_TR_GPRS_BEARER_TELE_DATA B
+          WHERE (A.IMSI=:l_imsi_c OR A.MSISDN=:l_msisdn_c)
+          AND A.ACTIVE_ROAMING_PROFILE_ID = :l_gprs_active_roaming_subs_profile_id
+          AND A.IMSI = B.IMSI AND A.ACTIVE_ROAMING_PROFILE_ID = B.ACTIVE_ROAMING_PROFILE_ID
+          AND B.BEARER_TELE_CODE=33 AND B.BEARER_TELE_TYPE = '2';
+      }
+    }
+    else
+    {
+      if(l_networkAccessMode_c.arr[0]!='1')
+      {
+        queryIndex=14;
+        EXEC SQL SELECT COUNT(1) INTO :l_mtSmsProvisioned_c
+          FROM HLR_MT_SUB_GSM_INFO A, HLR_TR_GSM_BEARER_TELE_DATA B
+          WHERE (A.IMSI=:l_imsi_c OR A.MSISDN=:l_msisdn_c)
+          AND A.ACTIVE_ROAMING_PROFILE_ID = :l_gsm_active_roaming_subs_profile_id
+          AND A.IMSI = B.IMSI AND A.ACTIVE_ROAMING_PROFILE_ID = B.ACTIVE_ROAMING_PROFILE_ID
+          AND B.BEARER_TELE_CODE=33 AND B.BEARER_TELE_TYPE = '2';
+
+        if(l_networkAccessMode_c.arr[0]=='2')
+        {
+        queryIndex=15;
+          EXEC SQL SELECT COUNT(1) INTO :l_mtSmsProvisioned_c
+            FROM HLR_MT_SUB_GPRS_INFO A, HLR_MT_SUB_GPRS_BEAR_TELE_DATA B
+            WHERE (A.IMSI=:l_imsi_c OR A.MSISDN=:l_msisdn_c)
+            AND A.ACTIVE_ROAMING_PROFILE_ID = :l_gprs_active_roaming_subs_profile_id
+            AND A.IMSI = B.IMSI AND A.ACTIVE_ROAMING_PROFILE_ID = B.ACTIVE_ROAMING_PROFILE_ID
+            AND B.BEARER_TELE_CODE=33 AND B.BEARER_TELE_TYPE = '2';
+        }
+      }
+      else
+      {
+        queryIndex=16;
+        EXEC SQL SELECT COUNT(1) INTO :l_mtSmsProvisioned_c
+          FROM HLR_MT_SUB_GPRS_INFO A, HLR_MT_SUB_GPRS_BEAR_TELE_DATA B
+          WHERE (A.IMSI=:l_imsi_c OR A.MSISDN=:l_msisdn_c)
+          AND A.ACTIVE_ROAMING_PROFILE_ID = :l_gprs_active_roaming_subs_profile_id
+          AND A.IMSI = B.IMSI AND A.ACTIVE_ROAMING_PROFILE_ID = B.ACTIVE_ROAMING_PROFILE_ID
+          AND B.BEARER_TELE_CODE=33 AND B.BEARER_TELE_TYPE = '2';
+      }
+    }
+// End Release_2.1.8.0
+    //spell-2100 End (07/02/2012)
+
+    l_mtSmsProvisioned_c.arr[l_mtSmsProvisioned_c.len] = '\0';
+    if ( l_mtSmsProvisioned_c.arr[0] > '1' )
+    {
+      l_mtSmsProvisioned_c.arr[0] = '1'; 
+    }
+    if(l_networkAccessMode_c.arr[0]!='1')
+    {
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " execute l_ssbarring_c query...|%s",__FUNCTION__); 
+      queryIndex=14;
+      EXEC SQL SELECT COUNT(1)
+        INTO :l_ssbarring_c
+        FROM HLR_MT_SUB_GSM_INFO A,HLR_MT_SUB_CALLBARR_INFO  B, HLR_TR_SUB_GSM_INFO C
+        WHERE A.MSISDN = :l_temp_msisdn_c AND A.MSISDN = B.MSISDN AND A.MSISDN = C.MSISDN //spell-2.0.12.1
+        //WHERE A.IMSI = :l_imsi_c AND A.IMSI = B.IMSI AND A.IMSI = C.IMSI
+        AND A.BARRING_SS='1' 
+        AND	(B.SS_CODE=144 OR B.SS_CODE=153 OR B.SS_CODE=154 OR (B.SS_CODE=155 AND C.ROAMING_STATUS !='0')) 
+        AND B.BASICSERVICEGROUP_CODE=32
+        AND B.BASICSERVICEGROUP_TYPE='2'
+        AND B.SS_STATUS=7 
+        AND B.ACTIVE_ROAMING_PROFILE_ID= :l_gsm_active_roaming_subs_profile_id
+        AND A.ACTIVE_ROAMING_PROFILE_ID = :l_gsm_active_roaming_subs_profile_id; //2.0.10.0 - Roaming profile change
+    }
+    else
+    {
+      l_ssbarring_c.arr[0]='0';
+      l_ssbarring_c.len++;
+    }
+    l_ssbarring_c.arr[l_ssbarring_c.len] = '\0';
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " --> l_ssbarring_c.arr = %s |%s",(char *)l_ssbarring_c.arr,__FUNCTION__);
+
+    //2.0.13.1 Begin
+
+    obj->setGsmOdbInducedBarring(l_gsmOdbinducedBarring);
+    obj->setGprsOdbInducedBarring(l_gprsOdbinducedBarring);
+
+    //2.0.13.1 End
+
+STMT1:
+
+    if ((l_gsmOdbinducedBarring) & (1048576))
+    {
+      l_operatorBarringGsm_c.len =1;
+      memcpy((char *)l_operatorBarringGsm_c.arr, "1",l_operatorBarringGsm_c.len);
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " OperatorBarring Set for GSM...|%s",__FUNCTION__);
+    }else
+    {
+      l_operatorBarringGsm_c.len =1;
+      memcpy((char *)l_operatorBarringGsm_c.arr, "0",l_operatorBarringGsm_c.len);
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " No OperatorBarring Set for GSM...| %s",__FUNCTION__);
+    }
+    l_operatorBarringGsm_c.arr[l_operatorBarringGsm_c.len] = '\0';
+
+    // BEGIN For GPRS
+
+    if ((l_gprsOdbinducedBarring) & (1048576))
+    {
+      l_operatorBarringGprs_c.len =1;
+      memcpy((char *)l_operatorBarringGprs_c.arr, "1",l_operatorBarringGprs_c.len);
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " OperatorBarring Set for GPRS...|%s",__FUNCTION__);
+    }else
+    {
+      l_operatorBarringGprs_c.len =1;
+      memcpy((char *)l_operatorBarringGprs_c.arr, "0",l_operatorBarringGprs_c.len);
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " No OperatorBarring Set for GPRS...| %s",__FUNCTION__);
+    }
+    l_operatorBarringGprs_c.arr[l_operatorBarringGprs_c.len] = '\0';
+
+    // END For GPRS
+    char temp_msisdn[MSISDN_SIZE +1];
+
+    if( !((l_msisdn.arr[0] == 0x30) && (l_msisdn.len == 1)) )
+    {
+      int temp_msisdn_len = BCDEncoderobj.CharToBCD(temp_msisdn,(char *)l_msisdn.arr,l_msisdn.len);
+      msisdn.setValue(temp_msisdn, temp_msisdn_len);
+      obj->setMsisdn(msisdn );
+    }
+
+    if( !((l_imsi.arr[0] == 0x30) && (l_imsi.len == 1)) )
+    {
+      char temp_imsi[IMSI_SIZE +1];
+      int temp_imsi_len = BCDEncoderobj.CharToBCD(temp_imsi,(char *)l_imsi.arr,l_imsi.len);
+      imsi.setValue(temp_imsi, temp_imsi_len);
+      obj->setImsi( imsi);
+    }
+
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " msisdn = %s | %s  ",(char *)l_msisdn.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " imsi = %s | %s  ",(char *)l_imsi.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " lmsi = %s |%s",(char *)l_lmsi_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mnrf = %s |%s",(char *)l_mnrf_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mcef_gsm = %d |%s",(char *)l_mcef_c,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mcef_gprs = %d |%s",(char *)l_mcef_c_gprs,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mnrr_gsm = %s |%s",(char *)l_mnrr_c_gsm.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mnrr_gprs = %s |%s",(char *)l_mnrr_c_gprs.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mnrg = %s |%s",(char *)l_mnrg_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mscSupportsMtSms = %s |%s",(char *)l_mscSupportsMtSms_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " notreachableGsm = %s |%s",(char *)l_notreachableGsm_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " sgsnSupportsMtSms = %s |%s",(char *)l_sgsnSupportsMtSms_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " networkAccessMode = %s|%s",(char *)l_networkAccessMode_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " ssbarring = %s |%s",(char *)l_ssbarring_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " operatorBarringForGSM = %s |%s",(char *)l_operatorBarringGsm_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " operatorBarringForGPRS = %s |%s",(char *)l_operatorBarringGprs_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "MT ODBBarring = %s |%s",(char *)l_mtodbBarring_value.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mtSmsProvisioned = %s |%s",(char *)l_mtSmsProvisioned_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " sgsnNumber = %s |%s",(char *)l_sgsnNumber_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " sgsnAddress = %s |%s",(char *)l_sgsnAddress_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " mscNumber = %s  |%s",(char *)l_mscNumber_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Vlr Number is = %s  |%s",(char *)l_vlrNumber_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " notreachableGprs = %s |%s",(char *)l_notreachableGprs_c.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_trace_required = %c |%s",l_trace_required,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_gsm_active_roaming_subs_profile_id=%d |%s",l_gsm_active_roaming_subs_profile_id,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_gprs_active_roaming_subs_profile_id=%d |%s",l_gprs_active_roaming_subs_profile_id,__FUNCTION__);
+    //Begin spell-2100 
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_mspurged_nongprs_flag.arr=%s|%s",(char*)l_mspurged_nongprs_flag.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " l_mspurged_gprs_flag.arr=%s|%s",(char*)l_mspurged_gprs_flag.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "VLR supports SuperCharger l_superCharger_c_gsm.arr=%s|%s",(char*)l_superCharger_c_gsm.arr,__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "SGSN supports SuperCharger l_superCharger_c_gprs.arr=%s|%s",(char*)l_superCharger_c_gprs.arr,__FUNCTION__);
+    //End spell-2100 
+
+    // copy the data from host varibles into output struct subsprofile
+
+    if( !((l_lmsi_c.arr[0] == 0x30) && (l_lmsi_c.len == 1)) )
+    {
+      Number lmsi(30);
+      lmsi.setValue((char *)l_lmsi_c.arr, l_lmsi_c.len);
+      obj->setLmsi( lmsi);
+    }
+
+    Number mnrf(30);
+    mnrf.setValue((char *)l_mnrf_c.arr, l_mnrf_c.len);
+    obj->setMnrf(mnrf );
+
+    Number mcef(30);
+    if (l_mcef_c == 1 || l_mcef_c_gprs == 1)
+    {
+      mcef.setValue((char *)"1", 1);
+    }
+    else
+    {
+      mcef.setValue((char *)"0", 1);
+    }
+    obj->setMcef( mcef );
+
+    Number mnrrGsm(30);
+    mnrrGsm.setValue((char *)l_mnrr_c_gsm.arr, l_mnrr_c_gsm.len);
+    obj->setMnrrGsm( mnrrGsm );
+
+    if ( l_mnrr_c_gprs.len > 0 )
+    {
+      Number mnrrGprs(30);
+      mnrrGprs.setValue((char *)l_mnrr_c_gprs.arr, l_mnrr_c_gprs.len);
+      obj->setMnrrGprs( mnrrGprs );
+    }
+
+    if ( l_mnrg_c.len > 0 )
+    {
+      Number mnrg(30);
+      mnrg.setValue((char *)l_mnrg_c.arr, l_mnrg_c.len);
+      obj->setMnrg( mnrg );
+    }
+
+
+    Number mscSupportsMtSms(30);
+    mscSupportsMtSms.setValue((char *)l_mscSupportsMtSms_c.arr, l_mscSupportsMtSms_c.len);
+    obj->setMscSupportsMtSms( mscSupportsMtSms );
+
+    Number msNotReachableFlagForGsm(30);
+    msNotReachableFlagForGsm.setValue( (char *)l_notreachableGsm_c.arr, l_notreachableGsm_c.len);
+    obj->setMsNotReachableFlagForGsm( msNotReachableFlagForGsm );
+
+
+    if(l_msNotReachableInMscStatus.len>0)
+    {
+      Number msNotReachableInMscStatus(30);//mohan added Mar15 2009
+      msNotReachableInMscStatus.setValue((char *)l_msNotReachableInMscStatus.arr, l_msNotReachableInMscStatus.len);
+      obj->setMsReachableInMscStatus(msNotReachableInMscStatus);
+    }
+
+    if (l_notreachableGprs_c.len > 0)
+    {
+      Number msNotReachableFlagForGprs(30);
+      msNotReachableFlagForGprs.setValue( (char *)l_notreachableGprs_c.arr, l_notreachableGprs_c.len);
+      obj->setMsNotReachableFlagForGprs( msNotReachableFlagForGprs );
+    }
+
+    if (l_msNotReachableInSgsnStatus.len > 0)//mohan added Mar15 2009
+    {
+      Number msNotReachableInSgsnStatus(30);
+      msNotReachableInSgsnStatus.setValue( (char *)l_msNotReachableInSgsnStatus.arr, l_msNotReachableInSgsnStatus.len);
+      obj->setMsReachableInSgsnStatus( msNotReachableInSgsnStatus );
+    }
+
+    Number RoamingStatus(30);
+    RoamingStatus.setValue( (char *)l_roaming_status.arr, l_roaming_status.len);
+    obj->setRoamingStatus( RoamingStatus );
+
+    if (l_sgsnSupportsMtSms_c.len > 0)
+    {
+      Number sgsnSupportsMtSms(30);
+      sgsnSupportsMtSms.setValue((char *)l_sgsnSupportsMtSms_c.arr, l_sgsnSupportsMtSms_c.len);
+      obj->setSgsnSuppotsMtSms( sgsnSupportsMtSms );
+    }
+
+    Number networkAccessMode(30);
+    networkAccessMode.setValue((char *)l_networkAccessMode_c.arr, l_networkAccessMode_c.len);
+    obj->setNetworkAccessMode( networkAccessMode );
+
+    Number ssbarring(30);
+    ssbarring.setValue((char *)l_ssbarring_c.arr, l_ssbarring_c.len);
+    obj->setSsBarring( ssbarring );
+
+    Number gsm_operatorBarring(30);
+    gsm_operatorBarring.setValue((char *)l_operatorBarringGsm_c.arr, l_operatorBarringGsm_c.len);
+    obj->setOperatorBarringGSM(gsm_operatorBarring);
+
+    Number gprs_operatorBarring(30); //spell-2.0.13.1
+    gprs_operatorBarring.setValue((char *)l_operatorBarringGprs_c.arr, l_operatorBarringGprs_c.len);
+    obj->setOperatorBarringGPRS(gprs_operatorBarring);
+
+    //End 2.0.13.1_Rev1 
+
+    Number mtSmsProvisioned(30);
+    mtSmsProvisioned.setValue((char *)l_mtSmsProvisioned_c.arr, l_mtSmsProvisioned_c.len);
+    obj->setMtSmsProvisioned( mtSmsProvisioned );
+
+    Number traceRequired(30);
+    traceRequired.setValue(&l_trace_required, 1);
+    obj->setTraceRequired( traceRequired );
+
+    //spell-2100
+
+    Number vlrSupportsSupercharger(30);
+    vlrSupportsSupercharger.setValue((char *)l_superCharger_c_gsm.arr, l_superCharger_c_gsm.len);
+    obj->setvlrSupportsSuperCharger(vlrSupportsSupercharger);
+
+    Number sgsnSupportsSupercharger(30);
+    sgsnSupportsSupercharger.setValue((char *)l_superCharger_c_gprs.arr, l_superCharger_c_gprs.len);
+    obj->setsgsnSupportsSuperCharger(sgsnSupportsSupercharger);
+
+    //Spell-2100
+
+    if (l_sgsnNumber_c.len > 0) 
+    {
+      if( !((l_sgsnNumber_c.arr[0] == 0x30) && (l_sgsnNumber_c.len == 1)) )
+      {
+        char temp_s[SGSNNUM_SIZE +1];
+        int sgsnlen = BCDEncoderobj.CharToBCD(temp_s,(char *)l_sgsnNumber_c.arr, l_sgsnNumber_c.len);
+        Number sgsnNumber(sgsnlen);
+        sgsnNumber.setValue(temp_s, sgsnlen);
+        obj->setSgsnNumber( sgsnNumber );
+      }
+      else
+      {
+        l_sgsnNumberPresent_value.len=1;
+        memcpy((char *)l_sgsnNumberPresent_value.arr, "0",l_sgsnNumberPresent_value.len);
+        Number sgsnNumber(30);
+        sgsnNumber.setValue((char *)l_sgsnNumberPresent_value.arr, l_sgsnNumberPresent_value.len);
+        obj->setSgsnNumber(sgsnNumber);
+      }
+    }
+
+    if (l_sgsnAddress_c.len > 0)
+    {
+      if( !((l_sgsnAddress_c.arr[0] == 0x30) && (l_sgsnAddress_c.len == 1)) )
+      {	
+        char temp_s_addr[SCADDRESS_SIZE +1];
+        int sgsn_addr_len = BCDEncoderobj.CharToBCD(temp_s_addr,(char *)l_sgsnAddress_c.arr, l_sgsnAddress_c.len);
+        Number sgsnAddress(sgsn_addr_len);
+        sgsnAddress.setValue(temp_s_addr, sgsn_addr_len);
+        obj->setSgsnAddress( sgsnAddress );
+      }
+    }
+
+    if( !((l_mscNumber_c.arr[0] == 0x30) && (l_mscNumber_c.len == 1)) )
+    {
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " INSIDE MSC|%s",__FUNCTION__);
+      char temp_m[MSCNUM_SIZE +1];
+      int msclen =  BCDEncoderobj.CharToBCD(temp_m,(char *)l_mscNumber_c.arr, l_mscNumber_c.len);
+      Number mscNumber(msclen);
+      mscNumber.setValue(temp_m, msclen);
+      obj->setMscNumber(mscNumber);
+    }
+
+    if( !((l_vlrNumber_c.arr[0] == 0x30) && (l_vlrNumber_c.len == 1)) )
+    {
+      char temp_m[VLR_SIZE +1];
+      int vlrlen =  BCDEncoderobj.CharToBCD(temp_m,(char *)l_vlrNumber_c.arr, l_vlrNumber_c.len);
+      Number vlrNumber(vlrlen);
+      vlrNumber.setValue(temp_m, vlrlen);
+      obj->setVlrNumber(vlrNumber);
+    }
+
+    else
+    {
+      l_vlrNumberPresent_value.len=1;
+      memcpy((char *)l_vlrNumberPresent_value.arr, "0",l_vlrNumberPresent_value.len);
+      Number vlrNumber(30);
+      vlrNumber.setValue((char *)l_vlrNumberPresent_value.arr, l_vlrNumberPresent_value.len);
+      obj->setVlrNumber(vlrNumber);
+    }
+
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode)); 
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getSmsInfo |%s",__FUNCTION__);
+    return CODE_SQL_SUCCESS;
+
+  }
+  catch(...)
+  {	
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Caught Exception|%s",__FUNCTION__);
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getSmsInfo |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+DATA_NOT_FOUND: 
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0, "No Data Found at Query Index [%d]|%s",queryIndex,__FUNCTION__);
+    if((isJumpTrue== 0)&& (flag_gsm == 0))
+    {
+      Number zero(1);
+      zero.setValue("0",1);
+      obj->setmtOdbBarring(zero);
+    }
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getSmsInfo |%s",__FUNCTION__);
+    return ROWS_NOT_FOUND;
+  }
+SQL_ERROR_OCCURED:
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"SQL error occured at Query Index [%d] |%s",queryIndex,__FUNCTION__);
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Oracle Error code = %d, Mesg = %s |%s",sqlca.sqlcode, sqlca.sqlerrm.sqlerrmc, __FUNCTION__);
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getSmsInfo |%s",__FUNCTION__);
+    return PROC_CODE_ERROR;
+  }
+ABSENT_SUBSCRIBER:
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0, " Absent Subscriber,Row not found in GSM/GPRS TR table for the Subscriber at Query Index [%d]|%s",queryIndex,__FUNCTION__);
+    //Begin 2.0.13.1_Rev1
+    if ((l_operatorBarring_value) & (1048576))
+    {
+      l_mtodbBarring_value.len =1;
+      memcpy((char *)l_mtodbBarring_value.arr, "1",l_mtodbBarring_value.len);
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " BAIC ODB value is present in HLR_MT_ODB_DATA table ...%s|%s",(char *)l_mtodbBarring_value.arr,__FUNCTION__);
+    }
+    else
+    {
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " BAIC ODB value is not present in HLR_MT_ODB_DATA ...%s|%s",(char *)l_mtodbBarring_value.arr,__FUNCTION__);
+      l_mtodbBarring_value.len =1;
+      memcpy((char *)l_mtodbBarring_value.arr, "0",l_mtodbBarring_value.len);
+    }
+
+    Number mtOdbBarring(30);
+    mtOdbBarring.setValue((char *)l_mtodbBarring_value.arr, l_mtodbBarring_value.len);
+    obj->setmtOdbBarring(mtOdbBarring);
+
+    //End 2.0.13.1_Rev1
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving getSmsInfo |%s",__FUNCTION__);
+    return ABSENT_SUBSCRIBER;
+  }
+}
+
+ESqlRes SmsDbFunction::routeSmsToHplmnSmsc(DataFromDb *obj,Number&  scAddress)
+{
+  struct sqlca sqlca;
+  unsigned long m_Index=1;
+  int count=0;
+  BCDEncoder BCDEncoderobj;
+
+  loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Entering routeSmsToHplmnSmsc |%s",__FUNCTION__);
+
+  DbConnectionObject*  m_RunTimeCntxt =NULL;
+  m_RunTimeCntxt = (DbConnectionObject*)obj->dbConnObj;
+  if (m_RunTimeCntxt==NULL)
+  {
+    loggerObj.log(LM_CRITICAL,__FILE__,__LINE__,0,0,"Connection Object Could not be Acquired|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving routeSmsToHplmnSmsc |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+  EXEC SQL BEGIN DECLARE SECTION;
+
+  varchar		l_msisdn_c[MSISDN_SIZE +1];
+  varchar               l_temp_msisdn_c[MSISDN_SIZE +1];
+  varchar		l_imsi_c[IMSI_SIZE +1];
+  varchar		l_param_c[VAR_STRING_SIZE +1];
+  varchar		l_val_c[VAR_STRING_SIZE +1];
+  int l_count=0;
+
+  EXEC SQL END DECLARE SECTION;
+  memset( &l_temp_msisdn_c, '\0', sizeof(l_temp_msisdn_c));
+  memset( &l_msisdn_c, '\0', sizeof(l_msisdn_c));
+  memset( &l_imsi_c, '\0', sizeof(l_imsi_c));
+  memset( &l_param_c, '\0', sizeof(l_param_c));
+  memset( &l_val_c, '\0', sizeof(l_val_c));
+
+  unsigned int queryIndex = 0;
+
+  try
+  {
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, "Connection Object Acquired|%s",__FUNCTION__);
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, (char *)"SUCC::  Index :%ld |%s",m_Index,__FUNCTION__);
+
+    EXEC SQL CONTEXT USE :(m_RunTimeCntxt->iCtx);
+
+    EXEC SQL WHENEVER SQLERROR GOTO SQL_ERROR_OCCURED;
+    EXEC SQL WHENEVER NOT FOUND CONTINUE;
+
+    // if HPLMN SMSC is configured
+    if(obj->getSmscNumber().getOriginalLength() > 1)
+    {
+      l_param_c.len=strlen("SMS_FILTER_ENABLED_IN_SMSC");
+      strcpy((char*)l_param_c.arr, "SMS_FILTER_ENABLED_IN_SMSC");
+      l_param_c.arr[l_param_c.len]='\0';
+      queryIndex=1;
+      EXEC SQL SELECT NVL(VALUE,' ') INTO :l_val_c 
+        FROM HLR_MT_SYS_PARAMS WHERE PARAMETER = :l_param_c ; 
+
+      int filterSms=0, liInterceptReq=0;
+      if(l_val_c.arr[0] != ' ')
+        filterSms=atoi((const char*)l_val_c.arr);
+
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " PARAM[%s] Val[%s] filterSms[%d]|%s", l_param_c.arr, l_val_c.arr, filterSms,__FUNCTION__);
+
+      memset( &l_param_c, '\0', sizeof(l_param_c));
+      l_param_c.len=strlen("NON_HPLMN_MT_SMS_LI_REQUIRED");
+      strcpy((char*)l_param_c.arr, "NON_HPLMN_MT_SMS_LI_REQUIRED");
+      l_param_c.arr[l_param_c.len]='\0';
+
+      memset( &l_val_c, '\0', sizeof(l_val_c));
+      queryIndex=2;
+      EXEC SQL SELECT NVL(VALUE,' ') INTO :l_val_c 
+        FROM HLR_MT_SYS_PARAMS WHERE PARAMETER = :l_param_c ; 
+
+      if(l_val_c.arr[0] != ' ')
+        liInterceptReq=atoi((const char*)l_val_c.arr);
+
+      loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " PARAM[%s] Val[%s] liInterceptReq[%d]|%s", l_param_c.arr, l_val_c.arr, liInterceptReq,__FUNCTION__);
+
+      char roamingStatus= (obj->getRoamingStatus().getValue())[0];
+
+      if(liInterceptReq == 2) //Intercept SMS for roaming subscribers only
+      {
+        loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " RoamingStatus [%d]|%s", roamingStatus,__FUNCTION__);
+        if(roamingStatus == '0') //If Roaming status is 0 i.e Home
+          liInterceptReq=0;
+      }
+      if(liInterceptReq) //Intercept is required for non hplmn originates SMS
+      {
+        char msisdn_temp[MSISDN_SIZE +1]={'\0'};
+
+        memcpy(msisdn_temp,  obj->getMsisdn().getValue(), obj->getMsisdn().getOriginalLength());
+        loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " BCD MSISDN Len = %d|%s", obj->getMsisdn().getOriginalLength(),__FUNCTION__);
+
+        l_temp_msisdn_c.len = BCDEncoderobj.BCDToChar( (char *)l_temp_msisdn_c.arr, &msisdn_temp[0], obj->getMsisdn().getOriginalLength());
+        l_temp_msisdn_c.arr[l_temp_msisdn_c.len] = '\0';
+        loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " CHAR MSISDN = %s| and MSISDN Len = %d |%s",(char *)l_temp_msisdn_c.arr,l_temp_msisdn_c.len,__FUNCTION__);
+        queryIndex=3;
+        //Check If LI is enable for the subscriber
+        EXEC SQL SELECT NVL(COUNT(CASE_ID),0)INTO :l_count
+          FROM HLR_TT_LAWFULL_INTERCPT_INFO 
+          WHERE MSISDN = :l_temp_msisdn_c OR ( PREFIX ='1' AND  MSISDN=SUBSTR(:l_temp_msisdn_c ,1,length(MSISDN)));
+        loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " LI Enabled count = %d for MSISDN [%s]|%s", l_count, l_temp_msisdn_c.arr, __FUNCTION__);
+
+        if(l_count<1)
+          liInterceptReq=0;
+      }
+      if( filterSms==1 || (liInterceptReq > 0) ) 
+      {
+        char smscGtVal[20]={'\0'};
+        BCDEncoderobj.BCDToChar(smscGtVal ,scAddress.getValue() , scAddress.getOriginalLength());
+
+        loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " SMS Originated SMSC %s HPLMN SMSC %s |%s", smscGtVal, obj->getSmscNumber().getValue(),__FUNCTION__);
+
+        if(strlen(smscGtVal) == obj->getSmscNumber().getOriginalLength())
+        {
+          if(memcmp(smscGtVal, obj->getSmscNumber().getValue(), obj->getSmscNumber().getOriginalLength()) == 0)
+          {   
+            loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " SMS Originated SMSC %s HPLMN SMSC %s are same so inter SMSC routing is not required |%s", smscGtVal, obj->getSmscNumber().getValue(),__FUNCTION__);
+            return ROWS_NOT_FOUND; 
+          }
+        }
+        loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " SMS Originated SMSC %s HPLMN SMSC %s are not same so inter SMSC routing is required |%s", smscGtVal, obj->getSmscNumber().getValue(),__FUNCTION__);
+        return CODE_SQL_SUCCESS;
+      }
+    }
+    return ROWS_NOT_FOUND;
+  }
+  catch(...)
+  {
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Query Index:%d Caught Exception|%s",queryIndex,__FUNCTION__);
+    //  g_ConnectionPool->returnMember(m_RunTimeCntxt, m_Index, m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving routeSmsToHplmnSmsc |%s",__FUNCTION__);
+    return CODE_EXCEPTION;
+  }
+
+DATA_NOT_FOUND: 
+  {
+    loggerObj.log(LM_INFO,__FILE__,__LINE__,0,0, "Query Index:%d No Data found|%s",queryIndex,__FUNCTION__);
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt, m_Index, m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving routeSmsToHplmnSmsc |%s",__FUNCTION__);
+    return ROWS_NOT_FOUND;
+  }
+
+SQL_ERROR_OCCURED:
+  {
+    // g_ConnectionPool->returnMember(m_RunTimeCntxt,m_Index,m_RunTimeCntxt->checkConnectionStatus(sqlca.sqlcode));
+    loggerObj.log(LM_ERROR,__FILE__,__LINE__,0,0, "Query Index:%d Oracle Error code = %d, Mesg = %s |%s", queryIndex,sqlca.sqlcode,sqlca.sqlerrm.sqlerrmc, __FUNCTION__);
+    m_RunTimeCntxt->sqlErrorCode=sqlca.sqlcode;
+    loggerObj.log(LM_DEBUG,__FILE__,__LINE__,0,0, " Leaving routeSmsToHplmnSmsc |%s",__FUNCTION__);
+    return PROC_CODE_ERROR;
+  }
+}
+
